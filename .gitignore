@@ -7,3 +7,4 @@ dist/
 build/
 reports/
 data/
+shim/*.so
