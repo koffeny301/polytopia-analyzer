@@ -225,3 +225,13 @@ def test_save_allows_warnings(base):
     s, b = req(url + "/api/matches/warn", "POST", {"match": CITY_IMBALANCE})
     assert s == 200
     assert (data_dir / "warn.json").exists()
+
+
+def test_index_has_wizard_mode(base):
+    """M2: в интерфейсе есть переключатель Таблица/Мастер и карточка хода."""
+    url, _ = base
+    status, body = req(url + "/")
+    assert status == 200
+    assert 'id="view-toggle"' in body
+    assert 'id="wizard"' in body
+    assert "Ctrl+Enter" in body

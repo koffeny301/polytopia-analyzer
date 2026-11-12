@@ -87,6 +87,28 @@ table#grid td.turn-cell { color:var(--muted); padding-left:8px; font-variant-num
 table#grid td.pname-cell { font-weight:600; padding-left:8px; }
 table#grid td input { width:78px; padding:4px 6px; font-size:12.5px; border-radius:6px; }
 
+/* переключатель вида и мастер ввода (M2) */
+.hidden { display:none; }
+.view-toggle { display:flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+.view-toggle button { border:none; border-radius:0; padding:6px 14px; background:transparent; color:var(--muted); }
+.view-toggle button.active { background:var(--panel2); color:var(--gold); font-weight:600; }
+.wiz-head { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px; }
+.wiz-progress { font-family:Georgia,serif; color:var(--gold); font-size:16px; font-weight:600; white-space:nowrap; }
+.wiz-bar { flex:1; min-width:120px; height:6px; background:#12142a; border-radius:3px; overflow:hidden; }
+.wiz-bar-fill { height:100%; background:linear-gradient(90deg,#b8952e,#d4af37); width:0%; transition:width .2s; }
+.wiz-hint { color:var(--muted); font-size:11.5px; margin-bottom:10px; }
+.wiz-player { border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:10px; background:#191c36; }
+.wiz-player-head { display:flex; align-items:center; gap:8px; font-weight:600; margin-bottom:8px; }
+.wiz-chip { width:12px; height:12px; border-radius:3px; display:inline-block; flex-shrink:0; }
+.wiz-fields { display:grid; grid-template-columns:repeat(auto-fill,minmax(105px,1fr)); gap:8px; }
+.wiz-field span { display:block; color:var(--muted); font-size:10.5px; margin-bottom:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.wiz-field input { width:100%; }
+#wizard input.warn-input { border-color:#e6a700; background:rgba(230,167,0,.16); }
+.wiz-help { margin-top:10px; border-top:1px solid var(--border); padding-top:10px; }
+.wiz-help dl { margin:6px 0 0; display:grid; grid-template-columns:auto 1fr; gap:4px 12px; font-size:12px; }
+.wiz-help dt { color:var(--gold); font-weight:600; white-space:nowrap; }
+.wiz-help dd { margin:0; color:var(--muted); }
+
 /* модалка, тосты */
 #modal-backdrop { position:fixed; inset:0; background:rgba(5,6,15,.7); z-index:100;
   display:flex; align-items:center; justify-content:center; }
@@ -172,6 +194,8 @@ footer { text-align:center; color:var(--muted); font-size:11px; padding:14px; }
       2. «Новый матч» → укажите игроков и число ходов.<br>
       3. Заполняйте таблицу по ходу просмотра: счёт, доход, армия, города —
       на конец хода; убийства, потери, захваты, урон — за ход.<br>
+      &nbsp;&nbsp;&nbsp;Или включите «Мастер» — ввод по ходам с клавиатуры:
+      Enter — дальше, Ctrl+Enter — следующий ход.<br>
       4. «Сохранить», затем «📊 Построить отчёт» — откроется в новой вкладке.
     </div>
   </section>
@@ -208,9 +232,14 @@ footer { text-align:center; color:var(--muted); font-size:11px; padding:14px; }
     <div class="grid-toolbar">
       <label>Ходов: <input type="number" id="g-turns" min="1" max="500" value="30"></label>
       <label>Фильтр: <select id="g-filter"></select></label>
+      <div class="view-toggle" id="view-toggle">
+        <button type="button" data-view="table" class="active">Таблица</button>
+        <button type="button" data-view="wizard">Мастер</button>
+      </div>
       <span id="save-state"></span>
     </div>
-    <div class="grid-wrap"><table id="grid"></table></div>
+    <div class="grid-wrap" id="grid-wrap"><table id="grid"></table></div>
+    <div id="wizard" class="hidden"></div>
   </div>
 </section>
 </main>
@@ -247,6 +276,18 @@ const METRIC_HINTS = {
   captured:"захвачено городов за ход", lost_cities:"потеряно городов за ход",
   damage:"нанесено урона за ход"
 };
+const METRIC_WHERE = {
+  score:"итоговое табло в конце матча; в реплее — экран счёта игроков",
+  income:"верхняя панель игры: звёзды и прирост «+N» за ход",
+  army:"посчитайте юнитов игрока на карте в конце хода",
+  cities:"посчитайте города игрока на карте в конце хода",
+  kills:"следите за боями по ходу просмотра реплея",
+  losses:"следите за боями по ходу просмотра реплея",
+  captured:"момент захвата города или деревни в реплее",
+  lost_cities:"момент потери города в реплее",
+  damage:"в обычном интерфейсе не показывается — заполняйте, только если знаете точно"
+};
+const metricTitle = m => METRIC_HINTS[m] + "\nГде смотреть: " + METRIC_WHERE[m];
 const PALETTE = ["#e6194B","#3cb44b","#4363d8","#f58231","#911eb4",
                  "#42d4f4","#f032e6","#bfef45","#fabed4","#9A6324"];
 
@@ -256,6 +297,8 @@ const state = {
   turnsCount: 30,
   currentName: null,      // имя файла на сервере
   dirty: false,
+  view: "table",          // table | wizard (M2)
+  wizardTurn: 1,
 };
 
 /* ---------- утилиты ---------- */
@@ -386,6 +429,7 @@ function renderAll() {
   renderPlayers();
   renderFilterOptions();
   renderGrid();
+  if (state.view === "wizard") renderWizard();
   updateTitleBar();
   scheduleValidation();
 }
@@ -424,7 +468,7 @@ function renderGrid() {
   const players = state.match.players.filter(p => !filter || p.name === filter);
   $("g-turns").value = state.turnsCount;
   const head = "<thead><tr><th>Ход</th><th>Игрок</th>" +
-    METRICS.map(m => `<th title="${METRIC_HINTS[m]}">${METRIC_LABELS[m]}</th>`).join("") +
+    METRICS.map(m => `<th title="${esc(metricTitle(m))}">${METRIC_LABELS[m]}</th>`).join("") +
     "</tr></thead>";
   let rows = "";
   for (let t = 1; t <= state.turnsCount; t++) {
@@ -436,12 +480,111 @@ function renderGrid() {
         `<td class="turn-cell" style="border-left:4px solid ${esc(p.color || "#555")}">${t}</td>` +
         `<td class="pname-cell">${esc(p.name)}</td>` +
         METRICS.map(m =>
-          `<td><input type="text" inputmode="decimal" title="${METRIC_HINTS[m]}" ` +
+          `<td><input type="text" inputmode="decimal" title="${esc(metricTitle(m))}" ` +
           `data-key="${esc(k)}" data-metric="${m}" value="${esc(rec[m] ?? "")}"></td>`).join("") +
         "</tr>";
     }
   }
   $("grid").innerHTML = head + "<tbody>" + rows + "</tbody>";
+}
+
+/* ---------- мастер ввода по ходам (M2) ---------- */
+
+function wizPlayers() {
+  const filter = val("g-filter");
+  return state.match.players.filter(p => !filter || p.name === filter);
+}
+
+function countFilledTurns() {
+  const filled = new Set();
+  for (const [k, rec] of state.recMap) {
+    if (METRICS.some(m => String(rec[m] ?? "").trim() !== "")) filled.add(splitKey(k)[0]);
+  }
+  return filled.size;
+}
+
+function setView(v) {
+  state.view = v;
+  document.querySelectorAll("#view-toggle button").forEach(b =>
+    b.classList.toggle("active", b.dataset.view === v));
+  $("grid-wrap").classList.toggle("hidden", v !== "table");
+  if (v === "wizard") { renderWizard(); wizFocusFirst(); }
+  else { renderGrid(); $("wizard").classList.add("hidden"); }
+}
+
+function renderWizard() {
+  const el = $("wizard");
+  if (state.view !== "wizard") { el.classList.add("hidden"); return; }
+  el.classList.remove("hidden");
+  state.wizardTurn = Math.max(1, Math.min(state.wizardTurn, state.turnsCount));
+  const t = state.wizardTurn;
+  const players = wizPlayers();
+  const filled = countFilledTurns();
+  el.innerHTML =
+    `<div class="wiz-head">` +
+      `<button type="button" id="wiz-prev" title="Предыдущий ход (Ctrl+Shift+Enter)">←</button>` +
+      `<span class="wiz-progress">Ход ${t}/${state.turnsCount}</span>` +
+      `<button type="button" id="wiz-next" title="Следующий ход (Ctrl+Enter)">→</button>` +
+      `<div class="wiz-bar"><div class="wiz-bar-fill" style="width:${Math.round(filled / state.turnsCount * 100)}%"></div></div>` +
+      `<span class="hint">заполнено ходов: ${filled}/${state.turnsCount}</span>` +
+      `<button type="button" id="wiz-help-btn" class="icon" title="Справка по метрикам: где смотреть в игре">?</button>` +
+    `</div>` +
+    `<div class="wiz-hint">Enter — следующее поле · Shift+Enter — предыдущее · Ctrl+Enter — следующий ход · Ctrl+Shift+Enter — предыдущий ход · Esc — таблица</div>` +
+    players.map(p => {
+      const k = key(t, p.name);
+      const rec = state.recMap.get(k) || {};
+      return `<div class="wiz-player">` +
+        `<div class="wiz-player-head"><span class="wiz-chip" style="background:${esc(p.color || "#555")}"></span>${esc(p.name)}` +
+        (p.tribe ? ` <span class="hint">· ${esc(p.tribe)}</span>` : "") + `</div>` +
+        `<div class="wiz-fields">` +
+        METRICS.map(m =>
+          `<label class="wiz-field"><span title="${esc(metricTitle(m))}">${METRIC_LABELS[m]}</span>` +
+          `<input type="text" inputmode="decimal" title="${esc(metricTitle(m))}" ` +
+          `data-key="${esc(k)}" data-metric="${m}" value="${esc(rec[m] ?? "")}"></label>`).join("") +
+        `</div></div>`;
+    }).join("") +
+    `<div class="wiz-help hidden" id="wiz-help"><b style="color:var(--gold)">Где смотреть метрики в игре</b><dl>` +
+    METRICS.map(m => `<dt>${METRIC_LABELS[m]}</dt><dd>${esc(METRIC_HINTS[m])}. ${esc(METRIC_WHERE[m])}</dd>`).join("") +
+    `</dl></div>`;
+  $("wiz-prev").onclick = () => wizGoTurn(-1);
+  $("wiz-next").onclick = () => wizGoTurn(1);
+  $("wiz-help-btn").onclick = () => $("wiz-help").classList.toggle("hidden");
+  applyWarnHighlights();
+}
+
+function wizFocusFirst() {
+  const inp = document.querySelector("#wizard input[data-metric]");
+  if (inp) { inp.focus(); inp.select(); }
+}
+
+function wizGoTurn(delta) {
+  const next = state.wizardTurn + delta;
+  if (next < 1 || next > state.turnsCount) {
+    toast(next < 1 ? "Это первый ход" : "Это последний ход");
+    return;
+  }
+  state.wizardTurn = next;
+  renderWizard();
+  wizFocusFirst();
+}
+
+function updateWizProgress() {
+  const filled = countFilledTurns();
+  const bar = document.querySelector("#wizard .wiz-bar-fill");
+  const label = document.querySelector("#wizard .wiz-head .hint");
+  if (bar) bar.style.width = Math.round(filled / state.turnsCount * 100) + "%";
+  if (label) label.textContent = `заполнено ходов: ${filled}/${state.turnsCount}`;
+}
+
+function onMetricInput(inp) {
+  const k = inp.dataset.key, metric = inp.dataset.metric;
+  let rec = state.recMap.get(k);
+  if (!rec) { rec = {}; state.recMap.set(k, rec); }
+  rec[metric] = inp.value;
+  const tr = inp.closest("tr");
+  if (tr) tr.classList.toggle("filled", METRICS.some(m => String(rec[m] ?? "").trim() !== ""));
+  markDirty();
+  scheduleValidation();
 }
 
 function fmtDate(ts) {
@@ -568,6 +711,7 @@ function renamePlayerKeys(oldName, newName) {
 /* ---------- валидация ---------- */
 
 let validateTimer = null;
+let validationSeq = 0;
 let lastIssues = [];
 
 function scheduleValidation() {
@@ -576,6 +720,7 @@ function scheduleValidation() {
 }
 
 async function runValidation() {
+  const seq = ++validationSeq;
   if (!state.match.players.length || (!state.recMap.size && !state.currentName)) {
     renderValidation(null);
     return;
@@ -583,13 +728,19 @@ async function runValidation() {
   let m;
   try { m = collectMatch(); } catch (e) { renderValidation(null, e.message); return; }
   try {
-    renderValidation(await postJson("/api/validate", { match: m }));
-  } catch (e) { renderValidation(null, e.message); }
+    const rep = await postJson("/api/validate", { match: m });
+    if (seq !== validationSeq) return;   // ответ устарел — проверка уже перезапущена
+    renderValidation(rep);
+  } catch (e) {
+    if (seq !== validationSeq) return;
+    renderValidation(null, e.message);
+  }
 }
 
 function renderValidation(rep, localError) {
   const sum = $("validation-summary"), list = $("validation-issues"), btn = $("btn-verify");
-  document.querySelectorAll("#grid input.warn-input").forEach(i => i.classList.remove("warn-input"));
+  document.querySelectorAll("#grid input.warn-input, #wizard input.warn-input")
+    .forEach(i => i.classList.remove("warn-input"));
   lastIssues = [];
   if (localError) {
     sum.innerHTML = `<span style="color:var(--red)">${esc(localError)}</span>`;
@@ -616,17 +767,30 @@ function renderValidation(rep, localError) {
       <div>${esc(it.message)}</div>
     </div>`).join("");
   btn.style.display = (nw > 0 && !state.match.meta.verified) ? "" : "none";
+  applyWarnHighlights();
+}
+
+function applyWarnHighlights() {
   for (const it of lastIssues) {
     if (it.severity === "info" || it.turn == null || !it.player || !it.metric) continue;
-    const inp = document.querySelector(`#grid input[data-key="${CSS.escape(it.turn + "|" + it.player)}"][data-metric="${it.metric}"]`);
-    if (inp) inp.classList.add("warn-input");
+    const sel = `input[data-key="${CSS.escape(it.turn + "|" + it.player)}"][data-metric="${it.metric}"]`;
+    document.querySelectorAll(`#grid ${sel}, #wizard ${sel}`)
+      .forEach(inp => inp.classList.add("warn-input"));
   }
 }
 
 function focusIssue(el) {
   const it = lastIssues[Number(el.dataset.i)];
   if (!it || it.turn == null || !it.player) return;
-  const inp = document.querySelector(`#grid input[data-key="${CSS.escape(it.turn + "|" + it.player)}"][data-metric="${it.metric || "score"}"]`);
+  if (state.view === "wizard" && it.turn !== state.wizardTurn) {
+    state.wizardTurn = it.turn;
+    renderWizard();
+  }
+  const sel = `input[data-key="${CSS.escape(it.turn + "|" + it.player)}"][data-metric="${it.metric || "score"}"]`;
+  // сначала ищем в активном виде: скрытая таблица не может принять фокус
+  const first = state.view === "wizard" ? "#wizard" : "#grid";
+  const second = state.view === "wizard" ? "#grid" : "#wizard";
+  const inp = document.querySelector(`${first} ${sel}`) || document.querySelector(`${second} ${sel}`);
   if (inp) { inp.scrollIntoView({ block: "center" }); inp.focus(); }
 }
 
@@ -651,7 +815,7 @@ function wireEvents() {
     runValidation();
     toast("Предупреждения приняты — не забудьте сохранить (Ctrl+S)");
   };
-  $("g-filter").onchange = renderGrid;
+  $("g-filter").onchange = () => { renderGrid(); if (state.view === "wizard") renderWizard(); };
 
   $("btn-new").onclick = () => {
     $("np-title").value = "";
@@ -684,7 +848,10 @@ function wireEvents() {
   }
   $("m-turn-limit").addEventListener("change", () => {
     const tl = parseInt(val("m-turn-limit"), 10);
-    if (!Number.isNaN(tl) && tl > state.turnsCount) { state.turnsCount = tl; renderGrid(); }
+    if (!Number.isNaN(tl) && tl > state.turnsCount) {
+      state.turnsCount = tl; renderGrid();
+      if (state.view === "wizard") renderWizard();
+    }
   });
 
   $("g-turns").onchange = e => {
@@ -693,6 +860,7 @@ function wireEvents() {
     if (n > 500) n = 500;
     state.turnsCount = n;
     renderGrid();
+    if (state.view === "wizard") renderWizard();
     markDirty();
   };
 
@@ -713,7 +881,10 @@ function wireEvents() {
   });
   pr.addEventListener("change", e => {
     const f = e.target.dataset && e.target.dataset.f;
-    if (f === "name" || f === "color") { renderFilterOptions(); renderGrid(); }
+    if (f === "name" || f === "color") {
+      renderFilterOptions(); renderGrid();
+      if (state.view === "wizard") renderWizard();
+    }
   });
   pr.addEventListener("click", e => {
     const btn = e.target.closest("button[data-act='del-player']"); if (!btn) return;
@@ -744,14 +915,31 @@ function wireEvents() {
   $("grid").addEventListener("input", e => {
     const inp = e.target;
     if (inp.tagName !== "INPUT") return;
-    const k = inp.dataset.key, metric = inp.dataset.metric;
-    let rec = state.recMap.get(k);
-    if (!rec) { rec = {}; state.recMap.set(k, rec); }
-    rec[metric] = inp.value;
-    const tr = inp.closest("tr");
-    tr.classList.toggle("filled", METRICS.some(m => String(rec[m] ?? "").trim() !== ""));
-    markDirty();
-    scheduleValidation();
+    onMetricInput(inp);
+  });
+
+  // мастер ввода (M2): те же data-key/data-metric -> тот же recMap
+  $("view-toggle").addEventListener("click", e => {
+    const b = e.target.closest("button[data-view]");
+    if (b) setView(b.dataset.view);
+  });
+  $("wizard").addEventListener("input", e => {
+    const inp = e.target;
+    if (inp.tagName !== "INPUT" || !inp.dataset.metric) return;
+    onMetricInput(inp);
+    updateWizProgress();
+  });
+  $("wizard").addEventListener("keydown", e => {
+    if (e.key === "Escape") { e.preventDefault(); setView("table"); return; }
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    if (e.ctrlKey || e.metaKey) { wizGoTurn(e.shiftKey ? -1 : 1); return; }
+    const inputs = [...document.querySelectorAll("#wizard input[data-metric]")];
+    const i = inputs.indexOf(document.activeElement);
+    if (i === -1) return;
+    const next = i + (e.shiftKey ? -1 : 1);
+    if (next >= 0 && next < inputs.length) { inputs[next].focus(); inputs[next].select(); }
+    else wizGoTurn(e.shiftKey ? -1 : 1);
   });
 
   // список матчей
