@@ -153,6 +153,20 @@ def cmd_convert(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---------- web ----------
+
+def cmd_web(args: argparse.Namespace) -> int:
+    from .webapp import serve
+
+    try:
+        serve(host=args.host, port=args.port, data_dir=args.data_dir,
+              open_browser=not args.no_browser)
+    except OSError as e:
+        print(f"Ошибка: не удалось запустить сервер на {args.host}:{args.port} ({e})")
+        return 1
+    return 0
+
+
 # ---------- parser ----------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -188,6 +202,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("input")
     p.add_argument("output")
     p.set_defaults(func=cmd_convert)
+
+    p = sub.add_parser("web", help="запустить локальный веб-интерфейс (localhost)")
+    p.add_argument("--port", type=int, default=8765, help="порт (по умолчанию 8765)")
+    p.add_argument("--host", default="127.0.0.1",
+                   help="адрес (по умолчанию только локальный)")
+    p.add_argument("--data-dir", default=None,
+                   help="папка с матчами (по умолчанию data/ в проекте)")
+    p.add_argument("--no-browser", action="store_true",
+                   help="не открывать браузер автоматически")
+    p.set_defaults(func=cmd_web)
     return parser
 
 

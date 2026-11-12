@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polytopia Analyzer</title>
+<style>
+:root { --bg:#14162a; --panel:#1e2140; --panel2:#262a52; --gold:#d4af37;
+        --text:#e8e6df; --muted:#9a9db5; --border:#34396b; --red:#e15759; --green:#59d97f; }
+* { box-sizing: border-box; }
+body { margin:0; background:radial-gradient(1200px 500px at 50% -120px, #232752 0%, var(--bg) 60%);
+       color:var(--text); font-family:'Segoe UI', Roboto, Arial, sans-serif; font-size:14px; }
+
+header { position:sticky; top:0; z-index:50; display:flex; align-items:center; gap:14px;
+         padding:10px 18px; background:rgba(20,22,42,.92); backdrop-filter:blur(6px);
+         border-bottom:1px solid var(--border); }
+.brand { font-family:Georgia,serif; font-size:19px; color:var(--gold); letter-spacing:.4px; white-space:nowrap; }
+#current-name { color:var(--muted); font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+header .spacer { flex:1; }
+#version { color:var(--muted); font-size:11px; }
+
+button { background:var(--panel2); color:var(--text); border:1px solid var(--border);
+         border-radius:8px; padding:7px 14px; font-size:13px; cursor:pointer; }
+button:hover { border-color:var(--gold); }
+button.gold { background:linear-gradient(135deg,#b8952e,#d4af37); color:#1a1c2c;
+              border-color:#d4af37; font-weight:600; }
+button.gold:hover { filter:brightness(1.1); }
+button.icon { padding:3px 8px; font-size:12px; }
+button.linklike { background:none; border:none; color:#8fd3ff; padding:2px 6px; text-decoration:underline; }
+
+main { display:flex; gap:16px; padding:16px 18px 60px; max-width:1500px; margin:0 auto; align-items:flex-start; }
+aside { width:300px; flex-shrink:0; display:flex; flex-direction:column; gap:14px; position:sticky; top:64px; }
+#editor { flex:1; min-width:0; display:flex; flex-direction:column; gap:14px; }
+
+.card { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:14px; }
+.card h3 { margin:0 0 10px; font-family:Georgia,serif; color:var(--gold); font-size:15px; font-weight:600; }
+.hint { color:var(--muted); font-size:12px; line-height:1.5; }
+.hint.error { color:var(--red); }
+
+input[type=text], input[type=number], select { background:#12142a; color:var(--text);
+  border:1px solid var(--border); border-radius:7px; padding:6px 9px; font-size:13px; width:100%; }
+input:focus, select:focus { outline:none; border-color:var(--gold); }
+input[type=color] { width:42px; height:28px; border:1px solid var(--border); border-radius:6px;
+  background:#12142a; padding:2px; cursor:pointer; }
+input[type=checkbox] { accent-color:var(--gold); width:15px; height:15px; cursor:pointer; }
+label.f { display:block; margin-bottom:8px; }
+label.f span { display:block; color:var(--muted); font-size:11px; margin-bottom:3px; }
+
+/* список матчей */
+.match-item { display:flex; align-items:center; gap:6px; padding:8px 9px; border-radius:9px;
+  border:1px solid transparent; cursor:pointer; margin-bottom:5px; background:#191c36; }
+.match-item:hover { border-color:var(--border); }
+.match-item.current { border-color:var(--gold); }
+.mi-main { flex:1; min-width:0; }
+.mi-title { font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mi-sub { color:var(--muted); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mi-actions { display:flex; gap:4px; }
+
+/* ссылки */
+.link-row { display:flex; align-items:center; gap:8px; margin-top:6px; font-size:12px; }
+.link-row a { color:#8fd3ff; text-decoration:none; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.link-row code { color:var(--muted); font-size:11px; }
+
+/* мета-форма */
+.meta-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; }
+
+/* игроки */
+table.players { width:100%; border-collapse:collapse; }
+table.players th { text-align:left; color:var(--muted); font-size:11px; font-weight:600; padding:2px 8px 6px; }
+table.players td { padding:3px 8px 3px 0; }
+table.players td.center { text-align:center; }
+
+/* таблица ходов */
+.grid-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px; }
+.grid-toolbar label { color:var(--muted); font-size:12px; display:flex; align-items:center; gap:6px; }
+.grid-toolbar input[type=number] { width:74px; }
+.grid-toolbar select { width:auto; }
+#save-state { color:var(--gold); font-size:12px; margin-left:auto; }
+.grid-wrap { max-height:64vh; overflow:auto; border:1px solid var(--border); border-radius:10px; }
+table#grid { border-collapse:separate; border-spacing:0; width:100%; font-size:12.5px; }
+table#grid th { position:sticky; top:0; z-index:5; background:var(--panel2); color:var(--gold);
+  padding:8px 6px; text-align:left; font-weight:600; font-size:11.5px; white-space:nowrap;
+  border-bottom:2px solid var(--border); }
+table#grid td { padding:2px 4px; border-bottom:1px solid rgba(255,255,255,.05); white-space:nowrap; }
+table#grid tr.filled td { background:rgba(212,175,55,.05); }
+table#grid td.turn-cell { color:var(--muted); padding-left:8px; font-variant-numeric:tabular-nums; }
+table#grid td.pname-cell { font-weight:600; padding-left:8px; }
+table#grid td input { width:78px; padding:4px 6px; font-size:12.5px; border-radius:6px; }
+
+/* модалка, тосты */
+#modal-backdrop { position:fixed; inset:0; background:rgba(5,6,15,.7); z-index:100;
+  display:flex; align-items:center; justify-content:center; }
+#modal-backdrop.hidden { display:none; }
+#modal { background:var(--panel); border:1px solid var(--gold); border-radius:14px;
+  padding:22px; width:min(430px, 92vw); }
+#modal h3 { margin:0 0 14px; color:var(--gold); font-family:Georgia,serif; }
+.modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:14px; }
+#toast { position:fixed; left:50%; bottom:26px; transform:translateX(-50%) translateY(80px);
+  background:var(--panel2); border:1px solid var(--gold); color:var(--text);
+  padding:11px 20px; border-radius:11px; font-size:13px; opacity:0; transition:.25s; z-index:200;
+  max-width:80vw; }
+#toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+#toast.error { border-color:var(--red); }
+
+footer { text-align:center; color:var(--muted); font-size:11px; padding:14px; }
+@media (max-width: 980px) { main { flex-direction:column; } aside { width:100%; position:static; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">⚔️ Polytopia Analyzer</div>
+  <div id="current-name">новый матч</div>
+  <div class="spacer"></div>
+  <span id="version"></span>
+  <button id="btn-new">Новый матч</button>
+  <button id="btn-save">Сохранить</button>
+  <button id="btn-save-as" title="Сохранить под другим именем">Сохранить как…</button>
+  <button id="btn-report" class="gold">📊 Построить отчёт</button>
+</header>
+
+<main>
+<aside>
+  <section class="card">
+    <h3>Мои матчи</h3>
+    <div id="matches-list"><div class="hint">Загрузка…</div></div>
+    <label class="hint" style="display:block;margin-top:10px;cursor:pointer">
+      📂 Загрузить файл CSV/JSON
+      <input type="file" id="file-input" accept=".csv,.json,.txt" style="display:none">
+    </label>
+  </section>
+
+  <section class="card">
+    <h3>Ссылка на реплей</h3>
+    <input type="text" id="link-input" placeholder="https://share.polytopia.io/g/…">
+    <div style="margin-top:8px"><button id="btn-link">Разобрать ссылку</button></div>
+    <div id="link-result"></div>
+  </section>
+
+  <section class="card">
+    <h3>Экспорт</h3>
+    <div style="display:flex;gap:8px">
+      <button id="btn-csv" style="flex:1">Скачать CSV</button>
+      <button id="btn-json" style="flex:1">Скачать JSON</button>
+    </div>
+    <div class="hint" style="margin-top:8px">
+      CSV удобно править в Calc/Excel и хранить в Obsidian. Пустые ячейки = данные неизвестны (не ноль!).
+    </div>
+  </section>
+
+  <section class="card">
+    <h3>Как пользоваться</h3>
+    <div class="hint">
+      1. Вставьте ссылку на реплей → «Разобрать» → откройте матч в Steam.<br>
+      2. «Новый матч» → укажите игроков и число ходов.<br>
+      3. Заполняйте таблицу по ходу просмотра: счёт, доход, армия, города —
+      на конец хода; убийства, потери, захваты, урон — за ход.<br>
+      4. «Сохранить», затем «📊 Построить отчёт» — откроется в новой вкладке.
+    </div>
+  </section>
+</aside>
+
+<section id="editor">
+  <div class="card">
+    <h3>О матче</h3>
+    <div class="meta-grid">
+      <label class="f"><span>Название</span><input type="text" id="m-title" placeholder="Матч с друзьями"></label>
+      <label class="f"><span>Режим</span>
+        <input type="text" id="m-mode" list="modes" placeholder="Domination">
+        <datalist id="modes"><option>Perfection</option><option>Domination</option><option>Glory</option><option>Might</option></datalist>
+      </label>
+      <label class="f"><span>Карта</span><input type="text" id="m-map" placeholder="Large · Continent"></label>
+      <label class="f"><span>Дата</span><input type="text" id="m-date" placeholder="2026-11-12"></label>
+      <label class="f"><span>Лимит ходов</span><input type="number" id="m-turn-limit" min="1" max="500" placeholder="30"></label>
+      <label class="f"><span>Ссылка на реплей</span><input type="text" id="m-link" placeholder="https://share.polytopia.io/g/…"></label>
+      <label class="f" style="grid-column:1/-1"><span>Заметки</span><input type="text" id="m-notes" placeholder="произвольный текст"></label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Игроки</h3>
+    <table class="players">
+      <thead><tr><th>Имя</th><th>Племя</th><th>Цвет</th><th style="text-align:center">Это вы</th><th></th></tr></thead>
+      <tbody id="players-rows"></tbody>
+    </table>
+    <div style="margin-top:8px"><button id="btn-add-player">+ Добавить игрока</button></div>
+  </div>
+
+  <div class="card">
+    <h3>Данные по ходам</h3>
+    <div class="grid-toolbar">
+      <label>Ходов: <input type="number" id="g-turns" min="1" max="500" value="30"></label>
+      <label>Фильтр: <select id="g-filter"></select></label>
+      <span id="save-state"></span>
+    </div>
+    <div class="grid-wrap"><table id="grid"></table></div>
+  </div>
+</section>
+</main>
+
+<div id="modal-backdrop" class="hidden">
+  <div id="modal">
+    <h3>Новый матч</h3>
+    <label class="f"><span>Название</span><input type="text" id="np-title" placeholder="Матч с друзьями"></label>
+    <label class="f"><span>Игроки (через запятую)</span><input type="text" id="np-players" value="Игрок1,Игрок2"></label>
+    <label class="f"><span>Число ходов</span><input type="number" id="np-turns" value="30" min="1" max="500"></label>
+    <div class="modal-actions">
+      <button id="np-cancel">Отмена</button>
+      <button id="np-create" class="gold">Создать</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<footer>polytopia-match-analyzer · локальный веб-интерфейс · данные не покидают эту машину</footer>
+
+<script>
+"use strict";
+
+const METRICS = ["score","income","army","cities","kills","losses","captured","lost_cities","damage"];
+const METRIC_LABELS = {
+  score:"Счёт", income:"Доход ☆", army:"Армия", cities:"Города",
+  kills:"Убито врагов", losses:"Потери", captured:"Захват гор.",
+  lost_cities:"Потеря гор.", damage:"Урон"
+};
+const METRIC_HINTS = {
+  score:"общая стоимость (счёт) на конец хода", income:"звёзд за ход",
+  army:"юнитов на конец хода", cities:"городов на конец хода",
+  kills:"убито юнитов врага за ход", losses:"потеряно своих юнитов за ход",
+  captured:"захвачено городов за ход", lost_cities:"потеряно городов за ход",
+  damage:"нанесено урона за ход"
+};
+const PALETTE = ["#e6194B","#3cb44b","#4363d8","#f58231","#911eb4",
+                 "#42d4f4","#f032e6","#bfef45","#fabed4","#9A6324"];
+
+const state = {
+  match: { meta:{}, players:[], turns:[] },
+  recMap: new Map(),      // "turn|player" -> {metric: "строка значения" | ""}
+  turnsCount: 30,
+  currentName: null,      // имя файла на сервере
+  dirty: false,
+};
+
+/* ---------- утилиты ---------- */
+
+const $ = id => document.getElementById(id);
+const val = id => $(id).value;
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g,
+    c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function toNum(s) {
+  s = String(s ?? "").trim().replace(",", ".");
+  if (s === "") return null;
+  const n = Number(s);
+  return Number.isNaN(n) ? NaN : n;
+}
+const key = (turn, player) => turn + "|" + player;
+function splitKey(k) { const i = k.indexOf("|"); return [Number(k.slice(0, i)), k.slice(i + 1)]; }
+function slug(s) {
+  return String(s || "").trim().toLowerCase()
+    .replace(/[^\w\u0400-\u04FF]+/gi, "_").replace(/^_+|_+$/g, "");
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, opts);
+  const ct = res.headers.get("content-type") || "";
+  const data = ct.includes("application/json") ? await res.json() : await res.text();
+  if (!res.ok) throw new Error((data && data.error) || ("HTTP " + res.status));
+  if (data && data.ok === false) throw new Error(data.error || "ошибка");
+  return data;
+}
+const postJson = (path, obj) => api(path, {
+  method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(obj)
+});
+
+let toastTimer = null;
+function toast(msg, isError) {
+  const el = $("toast");
+  el.textContent = msg;
+  el.className = isError ? "show error" : "show";
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = ""; }, 4200);
+}
+const setStatus = msg => { $("save-state").textContent = msg; };
+
+function markDirty() { state.dirty = true; updateTitleBar(); }
+function updateTitleBar() {
+  const name = state.currentName || "новый матч";
+  $("current-name").textContent = name + (state.dirty ? " • (не сохранено)" : "");
+  document.title = (state.dirty ? "• " : "") + "Polytopia Analyzer — " + name;
+}
+
+function download(text, filename, mime) {
+  const blob = new Blob([text], { type: mime });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+
+/* ---------- модель матча в редакторе ---------- */
+
+function setMatch(dict, turnsOverride) {
+  const m = dict || {};
+  m.meta = m.meta || {};
+  m.players = (m.players || []).map((p, i) => ({
+    name: String(p.name ?? ("Игрок" + (i + 1))),
+    tribe: p.tribe || "",
+    color: p.color || PALETTE[i % PALETTE.length],
+    is_human: !!p.is_human,
+  }));
+  state.match = m;
+  state.recMap = new Map();
+  for (const t of (m.turns || [])) {
+    const rec = {};
+    for (const f of METRICS) rec[f] = (t[f] === undefined || t[f] === null) ? "" : String(t[f]);
+    state.recMap.set(key(t.turn, t.player), rec);
+  }
+  const maxTurn = (m.turns || []).reduce((a, t) => Math.max(a, t.turn || 0), 0);
+  state.turnsCount = turnsOverride || Math.max(m.meta.turn_limit || 0, maxTurn, 10);
+  renderAll();
+}
+
+function collectMatch() {
+  const players = state.match.players.map(p => ({
+    name: String(p.name).trim(), tribe: p.tribe || "",
+    color: p.color || null, is_human: !!p.is_human,
+  }));
+  if (players.some(p => !p.name)) throw new Error("У всех игроков должны быть имена");
+  const names = players.map(p => p.name);
+  if (new Set(names).size !== names.length) throw new Error("Имена игроков должны быть уникальны");
+  const turns = [];
+  for (const [k, rec] of state.recMap) {
+    const [t, p] = splitKey(k);
+    if (!names.includes(p)) continue;
+    const row = { turn: t, player: p };
+    let has = false;
+    for (const m of METRICS) {
+      const n = toNum(rec[m]);
+      if (n === null) continue;
+      if (Number.isNaN(n)) throw new Error(`Ход ${t}, ${p}: некорректное значение в «${METRIC_LABELS[m]}»`);
+      row[m] = n; has = true;
+    }
+    if (has) turns.push(row);
+  }
+  turns.sort((a, b) => a.turn - b.turn || String(a.player).localeCompare(String(b.player)));
+  return { meta: readMeta(), players, turns };
+}
+
+function readMeta() {
+  const meta = {};
+  const set = (k, v) => { if (String(v ?? "").trim() !== "") meta[k] = String(v).trim(); };
+  set("title", val("m-title")); set("date", val("m-date")); set("mode", val("m-mode"));
+  set("map", val("m-map")); set("link", val("m-link")); set("notes", val("m-notes"));
+  const tl = parseInt(val("m-turn-limit"), 10);
+  if (!Number.isNaN(tl) && tl > 0) meta.turn_limit = tl;
+  return meta;
+}
+
+/* ---------- отрисовка ---------- */
+
+function renderAll() {
+  setMetaForm(state.match.meta);
+  renderPlayers();
+  renderFilterOptions();
+  renderGrid();
+  updateTitleBar();
+}
+
+function setMetaForm(meta) {
+  $("m-title").value = meta.title || "";
+  $("m-date").value = meta.date || "";
+  $("m-mode").value = meta.mode || "";
+  $("m-map").value = meta.map || "";
+  $("m-link").value = meta.link || "";
+  $("m-turn-limit").value = meta.turn_limit ?? "";
+  $("m-notes").value = meta.notes || "";
+}
+
+function renderPlayers() {
+  $("players-rows").innerHTML = state.match.players.map((p, i) => `
+    <tr data-idx="${i}">
+      <td><input type="text" data-f="name" value="${esc(p.name)}"></td>
+      <td><input type="text" data-f="tribe" value="${esc(p.tribe)}" placeholder="племя"></td>
+      <td><input type="color" data-f="color" value="${esc(p.color || "#888888")}"></td>
+      <td class="center"><input type="checkbox" data-f="is_human" ${p.is_human ? "checked" : ""}></td>
+      <td class="center"><button class="icon" data-act="del-player" data-idx="${i}" title="Удалить игрока">✕</button></td>
+    </tr>`).join("");
+}
+
+function renderFilterOptions() {
+  const sel = $("g-filter");
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Все игроки</option>' +
+    state.match.players.map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join("");
+  sel.value = state.match.players.some(p => p.name === cur) ? cur : "";
+}
+
+function renderGrid() {
+  const filter = val("g-filter");
+  const players = state.match.players.filter(p => !filter || p.name === filter);
+  $("g-turns").value = state.turnsCount;
+  const head = "<thead><tr><th>Ход</th><th>Игрок</th>" +
+    METRICS.map(m => `<th title="${METRIC_HINTS[m]}">${METRIC_LABELS[m]}</th>`).join("") +
+    "</tr></thead>";
+  let rows = "";
+  for (let t = 1; t <= state.turnsCount; t++) {
+    for (const p of players) {
+      const k = key(t, p.name);
+      const rec = state.recMap.get(k) || {};
+      const filled = METRICS.some(m => String(rec[m] ?? "").trim() !== "");
+      rows += `<tr class="${filled ? "filled" : ""}">` +
+        `<td class="turn-cell" style="border-left:4px solid ${esc(p.color || "#555")}">${t}</td>` +
+        `<td class="pname-cell">${esc(p.name)}</td>` +
+        METRICS.map(m =>
+          `<td><input type="text" inputmode="decimal" title="${METRIC_HINTS[m]}" ` +
+          `data-key="${esc(k)}" data-metric="${m}" value="${esc(rec[m] ?? "")}"></td>`).join("") +
+        "</tr>";
+    }
+  }
+  $("grid").innerHTML = head + "<tbody>" + rows + "</tbody>";
+}
+
+function fmtDate(ts) {
+  const d = new Date(ts * 1000);
+  return d.toLocaleDateString("ru-RU") + " " +
+         d.toLocaleTimeString("ru-RU", { hour:"2-digit", minute:"2-digit" });
+}
+
+function renderMatches(items) {
+  const el = $("matches-list");
+  if (!items.length) { el.innerHTML = '<div class="hint">Пока нет сохранённых матчей</div>'; return; }
+  el.innerHTML = items.map(it => `
+    <div class="match-item ${it.name === state.currentName ? "current" : ""}" data-name="${esc(it.name)}">
+      <div class="mi-main">
+        <div class="mi-title">${esc(it.title || it.name)}</div>
+        <div class="mi-sub">${it.error
+          ? "⚠ " + esc(it.error)
+          : `${it.players.length} игр. · ${it.turns} ход. · ${esc(it.mode || "—")} · ${fmtDate(it.mtime)}`}</div>
+      </div>
+      <div class="mi-actions"><button class="icon" data-act="del" title="Удалить">🗑</button></div>
+    </div>`).join("");
+}
+
+/* ---------- действия ---------- */
+
+async function loadMatches() {
+  try {
+    const res = await api("/api/matches");
+    renderMatches(res.matches);
+  } catch (e) {
+    $("matches-list").innerHTML = `<div class="hint error">${esc(e.message)}</div>`;
+  }
+}
+
+async function loadMatchByName(name) {
+  if (state.dirty && !confirm("Несохранённые изменения будут потеряны. Загрузить матч?")) return;
+  try {
+    const res = await api("/api/matches/" + encodeURIComponent(name));
+    setMatch(res.match);
+    state.currentName = res.name;
+    state.dirty = false;
+    renderAll();
+    loadMatches();
+    toast("Загружен: " + res.name);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function saveMatch(saveAs) {
+  let m;
+  try { m = collectMatch(); } catch (e) { return toast(e.message, true); }
+  let name = state.currentName;
+  if (!name || saveAs) {
+    const suggest = slug(m.meta.title) ||
+      ("match_" + new Date().toISOString().slice(0, 16).replace(/[-:T]/g, ""));
+    name = prompt("Имя файла матча (без расширения):",
+                  name ? name.replace(/\.(json|csv)$/i, "") : suggest);
+    if (!name) return;
+  }
+  name = String(name).trim().replace(/\.(json|csv)$/i, "");
+  if (!name) return toast("Пустое имя файла", true);
+  try {
+    setStatus("Сохраняю…");
+    const res = await postJson("/api/matches/" + encodeURIComponent(name), { match: m });
+    state.currentName = res.name;
+    state.dirty = false;
+    setStatus("");
+    renderAll();
+    loadMatches();
+    toast("Сохранено: " + res.name);
+  } catch (e) { setStatus(""); toast(e.message, true); }
+}
+
+async function buildReport() {
+  let m;
+  try { m = collectMatch(); } catch (e) { return toast(e.message, true); }
+  if (!m.turns.length) return toast("Нет ни одной заполненной строки — отчёт будет пустым", true);
+  try {
+    setStatus("Строю отчёт…");
+    const res = await postJson("/api/analyze", { match: m });
+    const url = URL.createObjectURL(new Blob([res.html], { type: "text/html;charset=utf-8" }));
+    window.open(url, "_blank");
+    setStatus("");
+    toast("Отчёт открыт в новой вкладке");
+  } catch (e) { setStatus(""); toast(e.message, true); }
+}
+
+async function exportMatch(fmt) {
+  let m;
+  try { m = collectMatch(); } catch (e) { return toast(e.message, true); }
+  try {
+    const res = await postJson("/api/export", { match: m, format: fmt });
+    const base = slug(m.meta.title) ||
+      (state.currentName || "match").replace(/\.(json|csv)$/i, "");
+    download(res.text, base + "." + fmt,
+             fmt === "csv" ? "text/csv;charset=utf-8" : "application/json;charset=utf-8");
+    toast("Скачано: " + base + "." + fmt);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function parseLink() {
+  const link = val("link-input").trim();
+  if (!link) return toast("Вставьте ссылку на матч", true);
+  try {
+    const r = await postJson("/api/link", { link });
+    $("link-result").innerHTML =
+      `<div class="link-row"><span>Матч:</span><code>${esc(r.game_id)}</code></div>` +
+      `<div class="link-row"><a href="${esc(r.steam)}">▶ Открыть в Steam</a><button class="linklike" data-copy="${esc(r.steam)}">копировать</button></div>` +
+      `<div class="link-row"><a href="${esc(r.mobile)}">▶ Мобильная версия</a><button class="linklike" data-copy="${esc(r.mobile)}">копировать</button></div>` +
+      `<div class="link-row"><a href="${esc(r.share)}" target="_blank" rel="noopener">▶ Веб-ссылка</a><button class="linklike" data-copy="${esc(r.share)}">копировать</button></div>` +
+      `<div class="hint" style="margin-top:6px">Браузер может спросить разрешение на открытие Steam. Если не открывает — скопируйте ссылку и вставьте в адресную строку или терминал: xdg-open '${esc(r.steam)}'</div>`;
+    if (!val("m-link")) { $("m-link").value = r.share; markDirty(); }
+  } catch (e) { toast(e.message, true); }
+}
+
+function renamePlayerKeys(oldName, newName) {
+  const next = new Map();
+  for (const [k, v] of state.recMap) {
+    const [t, p] = splitKey(k);
+    next.set(p === oldName ? key(t, newName) : k, v);
+  }
+  state.recMap = next;
+}
+
+/* ---------- события ---------- */
+
+function wireEvents() {
+  $("btn-report").onclick = buildReport;
+  $("btn-save").onclick = () => saveMatch(false);
+  $("btn-save-as").onclick = () => saveMatch(true);
+  $("btn-link").onclick = parseLink;
+  $("link-input").addEventListener("keydown", e => { if (e.key === "Enter") parseLink(); });
+  $("btn-csv").onclick = () => exportMatch("csv");
+  $("btn-json").onclick = () => exportMatch("json");
+  $("g-filter").onchange = renderGrid;
+
+  $("btn-new").onclick = () => {
+    $("np-title").value = "";
+    $("np-players").value = "Игрок1,Игрок2";
+    $("np-turns").value = 30;
+    $("modal-backdrop").classList.remove("hidden");
+  };
+  const closeModal = () => $("modal-backdrop").classList.add("hidden");
+  $("np-cancel").onclick = closeModal;
+  $("modal-backdrop").addEventListener("click", e => { if (e.target.id === "modal-backdrop") closeModal(); });
+  $("np-create").onclick = () => {
+    if (state.dirty && !confirm("Несохранённые изменения будут потеряны. Создать новый матч?")) return;
+    const names = val("np-players").split(",").map(s => s.trim()).filter(Boolean);
+    if (!names.length) return toast("Введите имена игроков через запятую", true);
+    const turns = Math.max(1, Math.min(500, parseInt(val("np-turns"), 10) || 30));
+    setMatch({
+      meta: { title: val("np-title").trim(), date: new Date().toISOString().slice(0, 10) },
+      players: names.map(n => ({ name: n })),
+      turns: [],
+    }, turns);
+    state.currentName = null;
+    state.dirty = false;
+    renderAll();
+    closeModal();
+    toast("Матч создан — заполняйте таблицу по ходам");
+  };
+
+  for (const id of ["m-title","m-date","m-mode","m-map","m-link","m-turn-limit","m-notes"]) {
+    $(id).addEventListener("input", markDirty);
+  }
+  $("m-turn-limit").addEventListener("change", () => {
+    const tl = parseInt(val("m-turn-limit"), 10);
+    if (!Number.isNaN(tl) && tl > state.turnsCount) { state.turnsCount = tl; renderGrid(); }
+  });
+
+  $("g-turns").onchange = e => {
+    let n = parseInt(e.target.value, 10);
+    if (Number.isNaN(n) || n < 1) n = 1;
+    if (n > 500) n = 500;
+    state.turnsCount = n;
+    renderGrid();
+    markDirty();
+  };
+
+  // игроки
+  const pr = $("players-rows");
+  pr.addEventListener("input", e => {
+    const tr = e.target.closest("tr"); if (!tr) return;
+    const idx = Number(tr.dataset.idx);
+    const p = state.match.players[idx]; if (!p) return;
+    const f = e.target.dataset.f;
+    if (f === "name") {
+      const newName = e.target.value;
+      if (p.name !== newName) { renamePlayerKeys(p.name, newName); p.name = newName; }
+    } else if (f === "tribe") { p.tribe = e.target.value; }
+    else if (f === "color") { p.color = e.target.value; }
+    else if (f === "is_human") { p.is_human = e.target.checked; }
+    markDirty();
+  });
+  pr.addEventListener("change", e => {
+    const f = e.target.dataset && e.target.dataset.f;
+    if (f === "name" || f === "color") { renderFilterOptions(); renderGrid(); }
+  });
+  pr.addEventListener("click", e => {
+    const btn = e.target.closest("button[data-act='del-player']"); if (!btn) return;
+    const idx = Number(btn.dataset.idx);
+    const p = state.match.players[idx]; if (!p) return;
+    if (state.match.players.length <= 1) return toast("Нужен хотя бы один игрок", true);
+    if (!confirm(`Удалить игрока «${p.name}» и все его данные?`)) return;
+    state.match.players.splice(idx, 1);
+    for (const k of [...state.recMap.keys()]) {
+      const [, pl] = splitKey(k);
+      if (pl === p.name) state.recMap.delete(k);
+    }
+    state.match.players.forEach((pl, i) => { if (!pl.color) pl.color = PALETTE[i % PALETTE.length]; });
+    markDirty();
+    renderAll();
+  });
+  $("btn-add-player").onclick = () => {
+    const n = state.match.players.length + 1;
+    state.match.players.push({
+      name: "Игрок" + n, tribe: "",
+      color: PALETTE[(n - 1) % PALETTE.length], is_human: false,
+    });
+    markDirty();
+    renderAll();
+  };
+
+  // таблица ходов
+  $("grid").addEventListener("input", e => {
+    const inp = e.target;
+    if (inp.tagName !== "INPUT") return;
+    const k = inp.dataset.key, metric = inp.dataset.metric;
+    let rec = state.recMap.get(k);
+    if (!rec) { rec = {}; state.recMap.set(k, rec); }
+    rec[metric] = inp.value;
+    const tr = inp.closest("tr");
+    tr.classList.toggle("filled", METRICS.some(m => String(rec[m] ?? "").trim() !== ""));
+    markDirty();
+  });
+
+  // список матчей
+  $("matches-list").addEventListener("click", async e => {
+    const item = e.target.closest(".match-item"); if (!item) return;
+    const name = item.dataset.name;
+    const btn = e.target.closest("button");
+    if (btn && btn.dataset.act === "del") {
+      e.stopPropagation();
+      if (!confirm(`Удалить матч «${name}» с диска?`)) return;
+      try {
+        await api("/api/matches/" + encodeURIComponent(name), { method: "DELETE" });
+        if (state.currentName === name) { state.currentName = null; updateTitleBar(); }
+        toast("Удалено: " + name);
+        loadMatches();
+      } catch (err) { toast(err.message, true); }
+      return;
+    }
+    await loadMatchByName(name);
+  });
+
+  // загрузка файла
+  $("file-input").addEventListener("change", async e => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    if (state.dirty && !confirm("Несохранённые изменения будут потеряны. Загрузить файл?")) return;
+    try {
+      const res = await api("/api/upload", {
+        method: "POST", headers: {"Content-Type": "text/plain;charset=utf-8"},
+        body: await file.text(),
+      });
+      setMatch(res.match);
+      state.currentName = file.name.replace(/\.(csv|json|txt)$/i, "") + ".json";
+      state.dirty = true;
+      renderAll();
+      toast("Файл разобран: " + file.name + ". Нажмите «Сохранить», чтобы добавить в список.");
+    } catch (err) { toast("Не удалось разобрать файл: " + err.message, true); }
+  });
+
+  // копирование ссылок
+  $("link-result").addEventListener("click", e => {
+    const btn = e.target.closest("button[data-copy]"); if (!btn) return;
+    navigator.clipboard.writeText(btn.dataset.copy)
+      .then(() => toast("Ссылка скопирована"))
+      .catch(() => toast("Не удалось скопировать — выделите ссылку вручную", true));
+  });
+
+  // Ctrl+S — сохранить
+  document.addEventListener("keydown", e => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      saveMatch(false);
+    }
+  });
+
+  window.addEventListener("beforeunload", e => {
+    if (state.dirty) { e.preventDefault(); e.returnValue = ""; }
+  });
+}
+
+/* ---------- старт ---------- */
+
+function init() {
+  wireEvents();
+  setMatch({
+    meta: { date: new Date().toISOString().slice(0, 10) },
+    players: [{ name: "Игрок1" }, { name: "Игрок2" }],
+    turns: [],
+  }, 30);
+  state.dirty = false;
+  renderAll();
+  loadMatches();
+  fetch("/api/health").then(r => r.json())
+    .then(d => { $("version").textContent = "v" + d.version; })
+    .catch(() => {});
+}
+
+document.addEventListener("DOMContentLoaded", init);
+</script>
+</body>
+</html>

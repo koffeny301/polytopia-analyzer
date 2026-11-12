@@ -68,6 +68,30 @@ polytopia-analyzer convert data/match.csv data/match.json
 polytopia-analyzer analyze examples/demo_match.csv -o reports/demo.html --open
 ```
 
+## Веб-интерфейс (localhost)
+
+Самый удобный способ работы — локальная веб-страница:
+
+```bash
+polytopia-analyzer web                        # http://127.0.0.1:8765, откроется в браузере
+polytopia-analyzer web --port 9000 --no-browser
+```
+
+Возможности интерфейса:
+
+- **редактор матча**: мета-данные, игроки (имя/племя/цвет/«это вы»), таблица
+  «ход × игрок» со всеми метриками; пустые ячейки = данные неизвестны;
+- **список сохранённых матчей** (каталог `data/`): загрузить, удалить;
+- **загрузка файла** CSV/JSON прямо в браузер;
+- **ссылка на реплей**: вставили `share.polytopia.io/g/...` — получили
+  ссылки для Steam/мобильной версии с кнопками «копировать»;
+- **«📊 Построить отчёт»** — тот самый HTML-отчёт, открывается в новой вкладке;
+- **экспорт** в CSV/JSON, сохранение по Ctrl+S.
+
+Сервер слушает только 127.0.0.1 (данные не покидают машину), реализован на
+стандартном `http.server` без внешних зависимостей. Остановка — Ctrl+C
+в терминале (или `pkill -f "polytopia-analyzer web"`).
+
 ## Формат данных
 
 ### CSV
@@ -152,8 +176,9 @@ polytopia_analyzer/
 ├── links.py      # ссылки share.polytopia.io -> uuid -> deep-links
 ├── analysis.py   # производная статистика, места, лидеры, награды
 ├── report.py     # HTML-отчёт с plotly.js
-├── cli.py        # analyze / template / open / convert
-└── assets/plotly-basic.min.js
+├── webapp.py     # локальный веб-сервер (HTTP API)
+├── cli.py        # analyze / template / open / convert / web
+└── assets/       # plotly-basic.min.js, webui.html
 ```
 
 ## Дорожная карта
