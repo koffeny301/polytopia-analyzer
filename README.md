@@ -140,6 +140,9 @@ turn,player,score,income,army,cities,kills,losses,captured,lost_cities,damage
 .venv/bin/pytest -q        # 43 теста
 ```
 
+Принцип работы, внутреннее устройство, формат данных и точки расширения
+описаны в [ARCHITECTURE.md](ARCHITECTURE.md).
+
 Структура:
 
 ```
