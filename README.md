@@ -1,0 +1,161 @@
+# Polytopia Match Analyzer
+
+Анализ матчей **The Battle of Polytopia** с итоговым отчётом в стиле Civilization:
+интерактивные графики динамики, итоговая таблица, боевая статистика, смена
+лидеров и награды — всё в одном самодостаточном HTML-файле.
+
+```
+🏆 Победа: koffeny301 (Vengir) — 3 480 очков (отрыв +412)
+
+ #  Игрок            Счёт  Прирост  ☆/ход  Убито  Потер.   K/D  Гор.захв
+ 1  koffeny301       3480    +3060    8.4      21       9  2.33         4
+ 2  Wolf_Star        3068    +2648    7.6      14      15  0.93         2
+ 3  NovaAi           2740    +2320    7.1       8      17  0.47         1
+```
+
+## Откуда берутся данные
+
+**Важно про ссылки на матчи.** Ссылка вида `https://share.polytopia.io/g/<uuid>` —
+это только deep-link в приложение: данные матча хранятся на серверах Midjiwan
+и загружаются исключительно игровым клиентом. Публичного API для их получения
+не существует. Поэтому рабочий процесс такой:
+
+1. `polytopia-analyzer open <ссылка> --launch` — программа извлекает id матча
+   и открывает реплей в игре (Steam/мобильная версия).
+2. Во время просмотра вы заполняете таблицу матча (CSV) — программа-шаблон
+   создаётся командой `template`.
+3. `polytopia-analyzer analyze match.csv` — строится HTML-отчёт.
+
+Ссылка на реплей сохраняется в метаданных матча и попадает в отчёт.
+
+Архитектура допускает подключение автоматических источников данных в будущем
+(экспорт состояния через PolyMod на Steam, разбор `.state`-сейвов, OCR) —
+формат матча от источника не зависит.
+
+## Установка
+
+```bash
+cd /mnt/data/проекты/polytopia-match-analyzer
+python3 -m venv .venv
+.venv/bin/pip install -e .          # консольная команда polytopia-analyzer
+.venv/bin/pip install pytest        # для разработки
+```
+
+Запуск без установки: `.venv/bin/python -m polytopia_analyzer ...`
+
+## Команды
+
+```bash
+# 1. Создать шаблон таблицы матча (3 игрока, 30 ходов)
+polytopia-analyzer template --players "koffeny301,Wolf_Star,NovaAi" \
+    --turns 30 --mode Domination --title "Матч с друзьями" \
+    --link "https://share.polytopia.io/g/<uuid>" -o data/match.csv
+
+# 2. Открыть реплей по ссылке (для заполнения таблицы)
+polytopia-analyzer open "https://share.polytopia.io/g/<uuid>" [--launch]
+
+# 3. Построить отчёт (+ сводка в консоль)
+polytopia-analyzer analyze data/match.csv                 # -> data/match_report.html
+polytopia-analyzer analyze data/match.csv -o report.html --open
+
+# Конвертация CSV <-> JSON
+polytopia-analyzer convert data/match.csv data/match.json
+```
+
+Демо: `examples/demo_match.csv` (сгенерирован `examples/make_demo.py`).
+
+```bash
+polytopia-analyzer analyze examples/demo_match.csv -o reports/demo.html --open
+```
+
+## Формат данных
+
+### CSV
+
+Метаданные и игроки — в комментариях, таблица — по ходу матча:
+
+```csv
+# title: Матч с друзьями
+# date: 2026-11-12
+# mode: Domination
+# map: Large · Continent
+# link: https://share.polytopia.io/g/a4d531fd-1b81-428c-d81f-08dae2baaab2
+# turn_limit: 30
+# player: koffeny301; Vengir; #e6194B; human
+# player: Wolf_Star; Bardur; #4363d8
+turn,player,score,income,army,cities,kills,losses,captured,lost_cities,damage
+1,koffeny301,420,2,1,1,0,0,0,0,0
+1,Wolf_Star,450,3,2,1,0,0,0,0,0
+...
+```
+
+Формат строки игрока: `# player: имя; племя; цвет; human` (племя/цвет/human необязательны).
+
+### Колонки
+
+| Колонка       | Смысл                                        | Тип          |
+|---------------|----------------------------------------------|--------------|
+| `turn`        | номер хода                                   | целое        |
+| `player`      | имя игрока                                   | строка       |
+| `score`       | общая стоимость (счёт) на конец хода         | снимок       |
+| `income`      | доход, ☆ за ход                              | снимок       |
+| `army`        | размер армии на конец хода                   | снимок       |
+| `cities`      | общее число городов на конец хода            | снимок       |
+| `kills`       | убито юнитов врага за ход                    | прирост      |
+| `losses`      | потеряно своих юнитов за ход                 | прирост      |
+| `captured`    | захвачено городов за ход                     | прирост      |
+| `lost_cities` | потеряно городов за ход                      | прирост      |
+| `damage`      | нанесённый урон за ход                       | прирост      |
+
+Все метрики кроме `turn`/`player` необязательны — недостающие колонки и пустые
+ячейки считаются нулями. Ходы можно заполнять выборочно: графики строятся по
+записанным точкам, места считаются по последнему известному счёту.
+
+### JSON
+
+```json
+{
+  "meta": {"title": "...", "mode": "...", "link": "https://share.polytopia.io/g/..."},
+  "players": [{"name": "...", "tribe": "...", "color": "#rrggbb", "is_human": true}],
+  "turns": [{"turn": 1, "player": "...", "score": 420, "kills": 0, ...}]
+}
+```
+
+## Что показывает отчёт
+
+- Баннер победителя и итоговая таблица (счёт, прирост, доход, K/D, города, урон);
+- Динамика общей стоимости по ходам (как график счёта в Civilization);
+- Хронология лидерства (кто вёл на каждом ходу);
+- Экономика: доход ☆/ход и число городов;
+- Армия: размер по ходам и смена мест игроков;
+- Боевые действия: накопительные kills/losses и сравнение боевых итогов;
+- Награды: «Воин», «Экономист», «Завоеватель», «Снайпер», «Стратег».
+
+Отчёт самодостаточен: plotly.js встроен в HTML (~1 МБ), интернет не нужен.
+Флаг `--cdn` уменьшает файл, но требует сеть при просмотре.
+
+## Разработка
+
+```bash
+.venv/bin/pytest -q        # 43 теста
+```
+
+Структура:
+
+```
+polytopia_analyzer/
+├── models.py     # Match / Player / TurnRecord + валидация
+├── storage.py    # CSV/JSON: парсинг, сериализация, приведение типов
+├── links.py      # ссылки share.polytopia.io -> uuid -> deep-links
+├── analysis.py   # производная статистика, места, лидеры, награды
+├── report.py     # HTML-отчёт с plotly.js
+├── cli.py        # analyze / template / open / convert
+└── assets/plotly-basic.min.js
+```
+
+## Дорожная карта
+
+- [ ] Адаптер экспорта PolyMod (JSON состояния из Steam-клиента)
+- [ ] Парсер `.state`-сейвов одиночной игры (LZ4 + бинарный формат)
+- [ ] OCR-распознавание экрана счёта из игры/скриншотов
+- [ ] Сравнение нескольких матчей одного игрока (тренды)
