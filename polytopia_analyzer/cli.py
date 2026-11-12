@@ -8,6 +8,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import time
 import webbrowser
 from pathlib import Path
 
@@ -204,6 +205,64 @@ def cmd_convert(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---------- import-inbox ----------
+
+def _default_shim_out() -> Path:
+    stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M")
+    return Path("data") / f"shim-{stamp}.json"
+
+
+def _import_inbox_once(directory: Path, out: Path, args) -> tuple[int, Match]:
+    from .importers import shim
+
+    match = shim.match_from_inbox(
+        directory, title=args.title, date=args.date, link=args.link,
+        mode=args.mode, map_name=args.map,
+    )
+    rep = validate_match(match)
+    save_match(match, out)
+    return len(rep.errors), match
+
+
+def cmd_import_inbox(args: argparse.Namespace) -> int:
+    from .importers import shim
+
+    directory = Path(args.dir).expanduser() if args.dir else shim.default_inbox_dir()
+    session = shim.scan_inbox(directory)
+    if session.is_empty:
+        print(f"Ошибка: в папке нет снимков состояния: {directory}")
+        print("Подсказка: снимки пишет шим, см. docs/shim-dump.md")
+        return 1
+    out = Path(args.output).expanduser() if args.output else _default_shim_out()
+
+    if not args.watch:
+        n_err, match = _import_inbox_once(directory, out, args)
+        _print_validation(match)
+        _print_summary(match, out.resolve())
+        return 1 if n_err else 0
+
+    print(f"Слежу за папкой: {directory}")
+    print(f"Матч пишется в: {out.resolve()}")
+    last_mtime = 0.0
+    try:
+        while True:
+            session = shim.scan_inbox(directory)
+            if not session.is_empty and session.newest_mtime != last_mtime:
+                last_mtime = session.newest_mtime
+                try:
+                    n_err, match = _import_inbox_once(directory, out, args)
+                except ValueError as e:
+                    print(f"  пропуск: {e}")
+                else:
+                    print(f"  ходы {session.turns[0]}–{session.turns[-1]}: "
+                          f"{', '.join(match.player_names())} → {out} "
+                          f"(ошибок {n_err})")
+            time.sleep(max(1, args.interval))
+    except KeyboardInterrupt:
+        print("\nОстановлено.")
+        return 0
+
+
 # ---------- web ----------
 
 def cmd_web(args: argparse.Namespace) -> int:
@@ -257,6 +316,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("input")
     p.add_argument("output")
     p.set_defaults(func=cmd_convert)
+
+    p = sub.add_parser("import-inbox", help="импортировать снимки состояния игры (шим)")
+    p.add_argument("--dir", default=None,
+                   help="папка со снимками (по умолчанию ~/.local/share/polytopia-analyzer/inbox)")
+    p.add_argument("-o", "--output", default=None,
+                   help="файл матча (по умолчанию data/shim-<дата>.json)")
+    p.add_argument("--title", default="", help="название матча")
+    p.add_argument("--link", default="", help="ссылка на реплей")
+    p.add_argument("--mode", default="", help="режим (Might/Perfection/…)")
+    p.add_argument("--map", default="", help="карта")
+    p.add_argument("--date", default="", help="дата матча (YYYY-MM-DD)")
+    p.add_argument("--watch", action="store_true",
+                   help="следить за папкой и обновлять матч по ходу реплея")
+    p.add_argument("--interval", type=float, default=3.0,
+                   help="период опроса папки в режиме --watch, секунды")
+    p.set_defaults(func=cmd_import_inbox)
 
     p = sub.add_parser("web", help="запустить локальный веб-интерфейс (localhost)")
     p.add_argument("--port", type=int, default=8765, help="порт (по умолчанию 8765)")

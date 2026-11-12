@@ -40,6 +40,45 @@ def test_analyze_creates_report_and_prints_summary(sample_csv, tmp_path, capsys)
     assert str(out) in captured
 
 
+@pytest.fixture
+def shim_inbox(tmp_path):
+    """Папка со снимками шима, как её оставляет игра."""
+    import json
+    from pathlib import Path
+
+    data = json.loads((Path(__file__).parent / "fixtures" /
+                       "replay-timeless-battles-shim.json").read_text(encoding="utf-8"))
+    d = tmp_path / "inbox"
+    d.mkdir()
+    for snap in data["turns"]:
+        (d / f"snapshot-{int(snap['turn']):03d}.json").write_text(
+            json.dumps(snap, ensure_ascii=False), encoding="utf-8")
+    return d
+
+
+def test_import_inbox_creates_match(shim_inbox, tmp_path, capsys):
+    out = tmp_path / "shim.json"
+    rc = main(["import-inbox", "--dir", str(shim_inbox), "-o", str(out),
+               "--title", "Timeless Battles", "--mode", "Might"])
+    assert rc == 0
+    match = load_match(out)
+    assert match.meta.source == "shim"
+    assert match.meta.title == "Timeless Battles"
+    assert match.player_names() == ["KOF", "Goylem"]
+    assert match.max_turn() == 12
+    assert match.records_for("KOF")[-1].score == 4485
+    printed = capsys.readouterr().out
+    assert "Победа: KOF" in printed
+
+
+def test_import_inbox_empty_dir_fails(tmp_path, capsys):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    rc = main(["import-inbox", "--dir", str(empty), "-o", str(tmp_path / "x.json")])
+    assert rc == 1
+    assert "нет снимков" in capsys.readouterr().out
+
+
 def test_analyze_default_output_path(sample_csv, capsys):
     rc = main(["analyze", str(sample_csv)])
     assert rc == 0

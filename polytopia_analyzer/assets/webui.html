@@ -194,6 +194,18 @@ footer { text-align:center; color:var(--muted); font-size:11px; padding:14px; }
   </section>
 
   <section class="card">
+    <h3>Импорт из игры (шим)</h3>
+    <div id="inbox-status" class="hint">Проверяю папку…</div>
+    <div style="margin-top:8px">
+      <button id="btn-inbox-import">⬇ Импортировать снимки</button>
+    </div>
+    <div class="hint" style="margin-top:8px">
+      Шим читает состояние во время реплея: счёт, звёзды, города, убийства, потери.
+      Доход и армия в состоянии отсутствуют.
+    </div>
+  </section>
+
+  <section class="card">
     <h3>Ссылка на реплей</h3>
     <input type="text" id="link-input" placeholder="https://share.polytopia.io/g/…">
     <div style="margin-top:8px"><button id="btn-link">Разобрать ссылку</button></div>
@@ -934,6 +946,49 @@ function applyOcr() {
   toast(`Применено значений: ${updates.length} (источник: OCR). Проверьте данные и сохраните.`);
 }
 
+/* ---------- импорт из игры (шим, 6.3) ---------- */
+
+async function refreshInbox() {
+  const box = $("inbox-status"), btn = $("btn-inbox-import");
+  try {
+    const res = await api("/api/inbox");
+    if (!res.files) {
+      box.textContent = "Снимков нет. Включите шим и откройте реплей.";
+      box.classList.add("hint");
+      btn.disabled = true;
+      return;
+    }
+    const a = res.turns.length ? res.turns[0] : 0;
+    const b = res.turns.length ? res.turns[res.turns.length - 1] : 0;
+    box.textContent = `Снимков: ${res.files}, ходы ${a}–${b}`;
+    btn.disabled = false;
+  } catch (e) {
+    box.textContent = "Не удалось прочитать папку: " + e.message;
+    btn.disabled = true;
+  }
+}
+
+async function importInbox() {
+  setStatus("Импортирую снимки…");
+  try {
+    const title = (state.match && state.match.meta && state.match.meta.title) || "";
+    const link = (state.match && state.match.meta && state.match.meta.link) || "";
+    const res = await postJson("/api/inbox/import", { title, link });
+    setMatch(res.match);
+    state.currentName = res.name;
+    state.dirty = false;
+    renderAll();
+    loadMatches();
+    const v = res.validation || {};
+    const warns = (v.warnings || []).length;
+    setStatus("");
+    toast(`Импортировано: ${res.name}` + (warns ? `, предупреждений ${warns}` : ""));
+  } catch (e) {
+    setStatus("");
+    toast(e.message, true);
+  }
+}
+
 /* ---------- события ---------- */
 
 function wireEvents() {
@@ -941,6 +996,8 @@ function wireEvents() {
   $("btn-save").onclick = () => saveMatch(false);
   $("btn-save-as").onclick = () => saveMatch(true);
   $("btn-link").onclick = parseLink;
+  $("btn-inbox-import").onclick = importInbox;
+  refreshInbox();
   $("link-input").addEventListener("keydown", e => { if (e.key === "Enter") parseLink(); });
   $("btn-csv").onclick = () => exportMatch("csv");
   $("btn-json").onclick = () => exportMatch("json");

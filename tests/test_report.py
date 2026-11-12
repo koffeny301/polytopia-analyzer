@@ -79,6 +79,14 @@ def test_report_escapes_player_html():
     assert "&lt;img" in html
 
 
+def test_report_shows_source_chip():
+    m = make_match()
+    m.meta.source = "shim"
+    html = build_report(m)
+    assert "Источник" in html
+    assert "состояние игры (шим)" in html
+
+
 def test_report_handles_match_without_records():
     m = Match(meta=MatchMeta(title="Пусто"), players=[Player(name="A")], records=[])
     html = build_report(m)

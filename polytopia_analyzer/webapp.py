@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import base64
+import datetime
 import json
 import sys
 import threading
@@ -18,6 +19,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from . import __version__
 from .importers import ocr as ocr_mod
+from .importers import shim as shim_mod
 from .links import extract_game_id, mobile_link, share_link, steam_link
 from .report import build_report
 from .validation import validate_match
@@ -146,6 +148,17 @@ class RequestHandler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "version": __version__})
         if path == "/api/matches":
             return self._json({"ok": True, "matches": self._list_matches()})
+        if path == "/api/inbox":
+            directory = Path((qs.get("dir") or [""])[0]).expanduser() if qs.get("dir") \
+                else shim_mod.default_inbox_dir()
+            session = shim_mod.scan_inbox(directory)
+            return self._json({
+                "ok": True,
+                "dir": str(directory),
+                "files": len(session.files),
+                "turns": session.turns,
+                "mtime": session.newest_mtime,
+            })
         if path.startswith("/api/matches/"):
             return self._get_match(path[len("/api/matches/"):], qs)
         self._fail(404, f"Неизвестный маршрут: {path}")
@@ -231,6 +244,31 @@ class RequestHandler(BaseHTTPRequestHandler):
             gid = extract_game_id(str(payload.get("link", "")))
             return self._json({"ok": True, "game_id": gid, "share": share_link(gid),
                                "mobile": mobile_link(gid), "steam": steam_link(gid)})
+        if path == "/api/inbox/import":
+            raw = self._read_body()
+            payload = json.loads(raw.decode("utf-8")) if raw.strip() else {}
+            if not isinstance(payload, dict):
+                raise ValueError("Ожидался JSON-объект")
+            directory = Path(payload.get("dir") or shim_mod.default_inbox_dir()).expanduser()
+            session = shim_mod.scan_inbox(directory)
+            if session.is_empty:
+                return self._fail(404, f"В папке нет снимков состояния: {directory}")
+            match = shim_mod.match_from_inbox(
+                directory,
+                title=str(payload.get("title") or ""),
+                date=str(payload.get("date") or ""),
+                link=str(payload.get("link") or ""),
+                mode=str(payload.get("mode") or ""),
+                map_name=str(payload.get("map") or ""),
+            )
+            rep = validate_match(match)
+            name = str(payload.get("out") or "") or \
+                f"shim-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+            p = safe_match_path(self.data_dir, name)
+            save_match(match, p)
+            return self._json({"ok": True, "name": p.name,
+                               "match": match_to_dict(match),
+                               "validation": rep.to_dict()})
         if path.startswith("/api/matches/"):
             p = safe_match_path(self.data_dir, path[len("/api/matches/"):])
             payload = self._json_body()

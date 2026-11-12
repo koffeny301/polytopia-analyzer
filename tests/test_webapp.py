@@ -5,6 +5,7 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 import pytest
 
@@ -124,6 +125,55 @@ def test_path_traversal_rejected(base):
     url, _ = base
     s, _ = req(url + "/api/matches/..%2F..%2Fsecret")
     assert s == 400
+
+
+def _make_inbox(tmp_path):
+    """Раскладывает эталонные снимки шима по файлам."""
+    root = tmp_path / "inbox"
+    root.mkdir()
+    src = tmp_path.parent / "fixtures" / "replay-timeless-battles-shim.json"
+    if not src.exists():
+        src = Path(__file__).parent / "fixtures" / "replay-timeless-battles-shim.json"
+    data = json.loads(src.read_text(encoding="utf-8"))
+    for snap in data["turns"]:
+        (root / f"snapshot-{int(snap['turn']):03d}.json").write_text(
+            json.dumps(snap, ensure_ascii=False), encoding="utf-8")
+    return root
+
+
+def test_inbox_status(base, tmp_path):
+    url, _ = base
+    inbox = _make_inbox(tmp_path)
+    status, body = req(url + "/api/inbox?dir=" + urllib.parse.quote(str(inbox)))
+    assert status == 200
+    data = jload(body)
+    assert data["ok"] and data["files"] == 13
+    assert data["turns"][0] == 0 and data["turns"][-1] == 12
+
+
+def test_inbox_import_creates_match(base, tmp_path):
+    url, data_dir = base
+    inbox = _make_inbox(tmp_path)
+    status, body = req(url + "/api/inbox/import", method="POST",
+                       data={"dir": str(inbox), "title": "Timeless Battles", "out": "shim-test"})
+    assert status == 200
+    data = jload(body)
+    assert data["ok"] and data["name"] == "shim-test.json"
+    assert (data_dir / "shim-test.json").exists()
+    assert data["match"]["meta"]["source"] == "shim"
+    assert [p["name"] for p in data["match"]["players"]] == ["KOF", "Goylem"]
+
+    status, body = req(url + "/api/matches")
+    names = [m["name"] for m in jload(body)["matches"]]
+    assert "shim-test.json" in names
+
+
+def test_inbox_import_empty_dir_404(base, tmp_path):
+    url, _ = base
+    empty = tmp_path / "empty-inbox"
+    empty.mkdir()
+    status, body = req(url + "/api/inbox/import", method="POST", data={"dir": str(empty)})
+    assert status == 404
 
 
 def test_analyze_returns_report(base):

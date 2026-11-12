@@ -40,9 +40,26 @@ polytopia-analyzer open <ссылка> --launch      # реплей открое
 # -> /tmp/frames/series.json
 ```
 
-Архитектура допускает подключение автоматических источников данных в будущем
-(экспорт состояния через PolyMod на Steam, разбор `.state`-сейвов, OCR) —
-формат матча от источника не зависит.
+**Автомат: чтение состояния игры (Linux, нативная сборка).** Шим `LD_PRELOAD`
+(`shim/`) грузится в процесс игры и читает живой `GameState` — счёт, звёзды,
+города, убийства и потери по каждому игроку на каждом ходу. Игра при этом
+ничего не пишет: только чтение метаданных и полей.
+
+```bash
+make -C shim && cp shim/libpolyread_dump.so ~/.local/share/polytopia-analyzer/bin/
+shim/install-wrapper.sh --enable              # временная обёртка (обратимо)
+polytopia-analyzer open <ссылка> --launch     # реплей откроется в Steam
+polytopia-analyzer import-inbox --watch       # матч пишется по ходу реплея
+shim/install-wrapper.sh --restore
+```
+
+В веб-интерфейсе то же самое делает карточка «Импорт из игры (шим)».
+Подробности: `docs/shim-probe.md` (что видно через API движка) и
+`docs/shim-dump.md` (путь к состоянию, снимки, грабли).
+
+Архитектура допускает подключение и других источников (экспорт состояния через
+PolyMod на Steam/Proton, разбор `.state`-сейвов, OCR-скриншоты) — формат матча
+от источника не зависит.
 
 ## Установка
 
@@ -86,6 +103,10 @@ polytopia-analyzer validate data/match.csv
 
 # Конвертация CSV <-> JSON
 polytopia-analyzer convert data/match.csv data/match.json
+
+# 5. Импорт снимков состояния игры (шим) — разово или следя за папкой
+polytopia-analyzer import-inbox -o data/shim.json --title "Timeless Battles"
+polytopia-analyzer import-inbox --watch        # обновляет матч по ходу реплея
 ```
 
 Демо: `examples/demo_match.csv` (сгенерирован `examples/make_demo.py`).
@@ -228,13 +249,15 @@ polytopia_analyzer/
 ├── validation.py # правила проверки данных (ошибки/предупреждения/инфо)
 ├── report.py     # HTML-отчёт с plotly.js
 ├── webapp.py     # локальный веб-сервер (HTTP API)
-├── importers/    # ocr.py — распознавание чисел с табло (tesseract)
-├── cli.py        # analyze / template / open / convert / web
+├── importers/    # ocr.py — числа с табло; shim.py — снимки состояния игры
+├── cli.py        # analyze / template / open / convert / import-inbox / web
 └── assets/       # plotly-basic.min.js, webui.html
 ```
 
 ## Дорожная карта
 
+- [x] Чтение состояния игры шимом LD_PRELOAD на Linux (v0.2, M6.1–M6.3)
+- [ ] Установщик строки запуска Steam вместо временной обёртки (M6.4)
 - [ ] Адаптер экспорта PolyMod (JSON состояния из Steam-клиента)
 - [ ] Парсер `.state`-сейвов одиночной игры (LZ4 + бинарный формат)
 - [x] OCR-распознавание экрана счёта из игры/скриншотов (v0.2, M4)

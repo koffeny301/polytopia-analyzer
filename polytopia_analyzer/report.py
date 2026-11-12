@@ -243,9 +243,19 @@ def _winner_banner(match: Match) -> str:
     )
 
 
+_SOURCE_LABELS = {
+    "shim": "состояние игры (шим)",
+    "ocr": "OCR скриншота",
+    "polymod": "экспорт PolyMod",
+}
+
+
 def _meta_chips(match: Match) -> str:
     m = match.meta
     chips = []
+    if m.source:
+        chips.append('<span class="chip">Источник: <b>'
+                     f'{esc(_SOURCE_LABELS.get(m.source, m.source))}</b></span>')
     if m.mode:
         chips.append(f'<span class="chip">Режим: <b>{esc(m.mode)}</b></span>')
     if m.map:
