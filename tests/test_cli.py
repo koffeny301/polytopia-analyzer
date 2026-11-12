@@ -61,8 +61,8 @@ def test_template_creates_fillable_csv(tmp_path):
     m = load_match(out)
     assert m.player_names() == ["X", "Y"]
     assert m.meta.title == "Новый матч"
-    assert len(m.records) == 10
-    assert all(r.score == 0 for r in m.records)
+    # пустой шаблон: незаполненные строки игнорируются при загрузке
+    assert len(m.records) == 0
 
 
 def test_convert_csv_to_json_roundtrip(sample_csv, tmp_path):
@@ -87,3 +87,20 @@ def test_open_link_prints_deeplinks(capsys):
 def test_open_invalid_link_returns_error(capsys):
     rc = main(["open", "https://example.com/whatever"])
     assert rc == 1
+
+
+def test_template_partial_fill_analyze_ignores_empty_turns(tmp_path, capsys):
+    out = tmp_path / "t.csv"
+    assert main(["template", "--players", "P,Q", "--turns", "3", "-o", str(out)]) == 0
+    text = out.read_text(encoding="utf-8")
+    text = text.replace("1,P,,,,,,,,,", "1,P,100,2,1,1,0,0,0,0,0")
+    text = text.replace("1,Q,,,,,,,,,", "1,Q,90,2,1,1,0,0,0,0,0")
+    text = text.replace("2,P,,,,,,,,,", "2,P,250,4,2,1,1,0,0,0,5")
+    text = text.replace("2,Q,,,,,,,,,", "2,Q,180,3,2,1,0,1,0,0,0")
+    out.write_text(text, encoding="utf-8")
+    report = tmp_path / "r.html"
+    assert main(["analyze", str(out), "-o", str(report)]) == 0
+    summary = capsys.readouterr().out
+    assert "Победа: P" in summary
+    assert "250" in summary
+    assert report.exists()

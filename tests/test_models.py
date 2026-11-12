@@ -131,3 +131,49 @@ def test_json_rejects_non_numeric_metric():
     bad = '{"players": [{"name": "A"}], "turns": [{"turn": 1, "player": "A", "score": "много"}]}'
     with pytest.raises(ValueError, match="число"):
         match_from_json(bad)
+
+
+def test_csv_skips_fully_empty_rows():
+    csv_text = """# player: A
+# player: B
+turn,player,score,income,army,cities,kills,losses,captured,lost_cities,damage
+1,A,100,2,1,1,0,0,0,0,0
+1,B,90,1,1,1,0,0,0,0,0
+2,A,,,,,,,,,
+2,B,,,,,,,,,
+"""
+    m = match_from_csv(csv_text)
+    assert len(m.records) == 2
+    assert {r.turn for r in m.records} == {1}
+
+
+def test_csv_keeps_row_with_partial_data():
+    csv_text = """# player: A
+turn,player,score,income,army,cities,kills,losses,captured,lost_cities,damage
+1,A,100,,,,,,,,
+"""
+    m = match_from_csv(csv_text)
+    assert len(m.records) == 1
+    assert m.records[0].score == 100.0
+    assert m.records[0].kills == 0
+
+
+def test_json_skips_records_without_any_metric():
+    data = (
+        '{"players": [{"name": "A"}], "turns": ['
+        '{"turn": 1, "player": "A", "score": 5},'
+        '{"turn": 2, "player": "A"},'
+        '{"turn": 3, "player": "A", "score": null}]}'
+    )
+    m = match_from_json(data)
+    assert len(m.records) == 1
+    assert m.records[0].turn == 1
+
+
+def test_csv_writes_int_like_floats_without_decimal_point():
+    m = make_match()
+    m.records[0].score = 520.0
+    m.records[0].income = 2.5
+    text = match_to_csv(m)
+    assert "520.0" not in text
+    assert "2.5" in text

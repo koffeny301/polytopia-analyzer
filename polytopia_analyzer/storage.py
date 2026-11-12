@@ -48,6 +48,19 @@ def _to_number(value, field_name: str) -> float:
     raise ValueError(f"Поле {field_name!r}: ожидалось число, получено {value!r}")
 
 
+def _has_metrics(raw: dict) -> bool:
+    """True, если в сырой записи есть хоть одна непустая метрика.
+
+    Полностью пустые записы (например, незаполненные будущие ходы шаблона)
+    игнорируются при загрузке, чтобы нули не искажали статистику.
+    """
+    for f in METRIC_FIELDS:
+        v = raw.get(f)
+        if v is not None and str(v).strip() != "":
+            return True
+    return False
+
+
 def _coerce_record_fields(raw: dict) -> dict:
     unknown = set(raw) - {"turn", "player"} - set(METRIC_FIELDS)
     if unknown:
@@ -105,7 +118,11 @@ def match_from_dict(data: dict) -> Match:
     match = Match(
         meta=_meta_from_mapping(data.get("meta") or {}),
         players=[_player_from_mapping(p) for p in data.get("players") or []],
-        records=[TurnRecord(**_coerce_record_fields(t)) for t in data.get("turns") or []],
+        records=[
+            TurnRecord(**_coerce_record_fields(t))
+            for t in data.get("turns") or []
+            if _has_metrics(t)
+        ],
     )
     match.validate()
     return match
@@ -120,6 +137,13 @@ def match_from_json(text: str) -> Match:
 
 
 # ---------- CSV ----------
+
+def _fmt_cell(v) -> str:
+    """520.0 -> '520', 2.5 -> '2.5' — стабильный round-trip CSV."""
+    if isinstance(v, float) and v == int(v):
+        return str(int(v))
+    return str(v)
+
 
 def match_to_csv(match: Match) -> str:
     buf = io.StringIO()
@@ -139,7 +163,7 @@ def match_to_csv(match: Match) -> str:
     writer = csv.writer(buf)
     writer.writerow(CSV_COLUMNS)
     for r in sorted(match.records, key=lambda r: (r.turn, r.player)):
-        row = [getattr(r, c) for c in CSV_COLUMNS]
+        row = [_fmt_cell(getattr(r, col)) for col in CSV_COLUMNS]
         writer.writerow(row)
     return buf.getvalue()
 
@@ -200,6 +224,8 @@ def _parse_csv_table(data_lines: list[str]) -> list[TurnRecord]:
     records = []
     for i, row in enumerate(reader, start=2):
         clean = {(k or "").strip().lower(): v for k, v in row.items() if k}
+        if not _has_metrics(clean):
+            continue  # незаполненная строка (например, будущий ход из шаблона)
         try:
             records.append(TurnRecord(**_coerce_record_fields(clean)))
         except ValueError as e:
