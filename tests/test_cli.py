@@ -65,6 +65,18 @@ def test_template_creates_fillable_csv(tmp_path):
     assert len(m.records) == 0
 
 
+def test_template_records_turn_limit_and_link(tmp_path):
+    out = tmp_path / "t.csv"
+    url = "https://share.polytopia.io/g/35b44c27-a0a2-4f52-3290-08df4019957a"
+    rc = main(["template", "--players", "X,Y", "--turns", "7", "-o", str(out),
+               "--link", url])
+    assert rc == 0
+    assert "# turn_limit: 7" in out.read_text(encoding="utf-8")
+    m = load_match(out)
+    assert m.meta.turn_limit == 7
+    assert m.meta.link == url
+
+
 def test_convert_csv_to_json_roundtrip(sample_csv, tmp_path):
     j = tmp_path / "match.json"
     back = tmp_path / "back.csv"

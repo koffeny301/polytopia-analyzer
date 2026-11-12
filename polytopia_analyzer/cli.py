@@ -127,6 +127,7 @@ def cmd_template(args: argparse.Namespace) -> int:
         lines.append(f"# mode: {args.mode}")
     if args.link:
         lines.append(f"# link: {args.link}")
+    lines.append(f"# turn_limit: {args.turns}")
     for n in names:
         lines.append(f"# player: {n}")
     lines.append(",".join(CSV_COLUMNS))

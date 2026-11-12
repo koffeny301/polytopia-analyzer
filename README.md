@@ -41,6 +41,17 @@ python3 -m venv .venv
 .venv/bin/pip install pytest        # для разработки
 ```
 
+Команда ставится **внутрь `.venv/bin`, а не в PATH** — без активации
+окружения оболочка её не найдёт (`Unknown command` в fish). Активируйте
+окружение или вызывайте по полному пути:
+
+```bash
+source .venv/bin/activate           # bash/zsh
+source .venv/bin/activate.fish      # fish
+# либо без активации:
+.venv/bin/polytopia-analyzer -h
+```
+
 Запуск без установки: `.venv/bin/python -m polytopia_analyzer ...`
 
 ## Команды
