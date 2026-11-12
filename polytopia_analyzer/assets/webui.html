@@ -194,6 +194,16 @@ footer { text-align:center; color:var(--muted); font-size:11px; padding:14px; }
   </section>
 
   <section class="card">
+    <h3>Чтение из игры (Steam)</h3>
+    <div id="steam-status" class="hint">Проверяю параметры запуска…</div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button id="btn-steam-enable" style="flex:1">Включить</button>
+      <button id="btn-steam-disable" style="flex:1">Выключить</button>
+    </div>
+    <div id="steam-manual" class="hint" style="margin-top:8px"></div>
+  </section>
+
+  <section class="card">
     <h3>Импорт из игры (шим)</h3>
     <div id="inbox-status" class="hint">Проверяю папку…</div>
     <div style="margin-top:8px">
@@ -946,6 +956,45 @@ function applyOcr() {
   toast(`Применено значений: ${updates.length} (источник: OCR). Проверьте данные и сохраните.`);
 }
 
+/* ---------- чтение из игры: строка запуска Steam (6.4) ---------- */
+
+async function refreshSteamShim() {
+  const box = $("steam-status"), manual = $("steam-manual");
+  const en = $("btn-steam-enable"), dis = $("btn-steam-disable");
+  try {
+    const res = await api("/api/steam-shim");
+    if (res.installed) {
+      box.textContent = "Включено: игра запускается с шимом." +
+        (res.steam_running ? " Steam запущен — перезапустите его, чтобы строка применилась." : "");
+      en.disabled = true; dis.disabled = false;
+    } else {
+      box.textContent = res.shim_present
+        ? "Выключено. Включите — и игра будет читать состояние при запуске из Steam."
+        : "Шим не собран: make -C shim (см. docs/shim-dump.md).";
+      en.disabled = !res.shim_present; dis.disabled = true;
+    }
+    manual.textContent = res.manual || "";
+  } catch (e) {
+    box.textContent = e.message;
+    en.disabled = true; dis.disabled = true;
+  }
+}
+
+async function steamShimAction(action) {
+  setStatus(action === "enable" ? "Включаю…" : "Выключаю…");
+  try {
+    const res = await postJson("/api/steam-shim", { action, force: true });
+    setStatus("");
+    let msg = action === "enable" ? "Чтение включено" : "Чтение выключено";
+    if (res.need_restart) msg += " — перезапустите Steam, чтобы применить";
+    toast(msg);
+    refreshSteamShim();
+  } catch (e) {
+    setStatus("");
+    toast(e.message, true);
+  }
+}
+
 /* ---------- импорт из игры (шим, 6.3) ---------- */
 
 async function refreshInbox() {
@@ -997,7 +1046,10 @@ function wireEvents() {
   $("btn-save-as").onclick = () => saveMatch(true);
   $("btn-link").onclick = parseLink;
   $("btn-inbox-import").onclick = importInbox;
+  $("btn-steam-enable").onclick = () => steamShimAction("enable");
+  $("btn-steam-disable").onclick = () => steamShimAction("disable");
   refreshInbox();
+  refreshSteamShim();
   $("link-input").addEventListener("keydown", e => { if (e.key === "Enter") parseLink(); });
   $("btn-csv").onclick = () => exportMatch("csv");
   $("btn-json").onclick = () => exportMatch("json");

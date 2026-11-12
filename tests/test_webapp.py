@@ -141,6 +141,52 @@ def _make_inbox(tmp_path):
     return root
 
 
+def test_steam_shim_status_and_toggle(base, tmp_path, monkeypatch):
+    from polytopia_analyzer import steam
+
+    cfg = tmp_path / "localconfig.vdf"
+    cfg.write_text('"X"\n{\n\t"apps"\n\t{\n\t\t"874390"\n\t\t{\n\t\t}\n\t}\n}\n"'
+                   .replace('\\t', '\t'), encoding="utf-8")
+    shim = tmp_path / "libpolyread_dump.so"
+    shim.write_bytes(b"\x7fELF fake")
+    monkeypatch.setattr(steam, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(steam, "is_steam_running", lambda: False)
+    monkeypatch.setattr(steam, "start_steam", lambda: None)
+    monkeypatch.setattr(steam, "shim_install_path", lambda: shim)
+    monkeypatch.setattr(steam, "default_config_path", lambda: cfg)
+
+    url, _ = base
+    status, body = req(url + "/api/steam-shim")
+    assert status == 200
+    data = jload(body)
+    assert data["ok"] and not data["installed"] and data["shim_present"]
+    assert "%command%" in data["manual"]
+
+    status, body = req(url + "/api/steam-shim", method="POST",
+                       data={"action": "enable", "force": True})
+    assert status == 200
+    assert jload(body)["ok"]
+    assert '"LaunchOptions"' in cfg.read_text(encoding="utf-8")
+
+    status, body = req(url + "/api/steam-shim", method="POST",
+                       data={"action": "disable", "force": True})
+    assert status == 200
+    assert '"LaunchOptions"' not in cfg.read_text(encoding="utf-8")
+
+
+def test_steam_shim_rejects_unknown_action(base, tmp_path, monkeypatch):
+    from polytopia_analyzer import steam
+
+    cfg = tmp_path / "localconfig.vdf"
+    cfg.write_text('"X"\n{\n\t"apps"\n\t{\n\t\t"874390"\n\t\t{\n\t\t}\n\t}\n}\n',
+                   encoding="utf-8")
+    monkeypatch.setattr(steam, "default_config_path", lambda: cfg)
+    monkeypatch.setattr(steam, "is_steam_running", lambda: False)
+    url, _ = base
+    status, _ = req(url + "/api/steam-shim", method="POST", data={"action": "hack"})
+    assert status == 400
+
+
 def test_inbox_status(base, tmp_path):
     url, _ = base
     inbox = _make_inbox(tmp_path)

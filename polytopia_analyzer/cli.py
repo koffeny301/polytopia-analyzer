@@ -263,6 +263,81 @@ def cmd_import_inbox(args: argparse.Namespace) -> int:
         return 0
 
 
+# ---------- install-shim ----------
+
+def _ensure_shim_installed(explicit: str | None) -> Path:
+    """Копирует собранный шим в стабильный путь, если его там нет."""
+    from . import steam as steam_mod
+
+    target = Path(explicit).expanduser() if explicit else steam_mod.shim_install_path()
+    if target.is_file():
+        return target
+    built = Path(__file__).resolve().parents[1] / "shim" / steam_mod.SHIM_NAME
+    if built.is_file():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(built, target)
+        print(f"Шим установлен: {target}")
+        return target
+    raise FileNotFoundError(
+        f"Шим не собран: нет {target} и {built}. Соберите: make -C shim")
+
+
+def cmd_install_shim(args: argparse.Namespace) -> int:
+    from . import steam as steam_mod
+
+    action = args.action or "status"
+    cfg = Path(args.config).expanduser() if args.config else None
+    try:
+        if action == "status":
+            st = steam_mod.status(cfg, shim=Path(args.shim).expanduser() if args.shim else None)
+            print(f"Конфиг Steam: {st.config}")
+            print(f"Приложение:   {st.appid}")
+            print(f"Шим:          {'найден' if st.shim_present else 'не найден'} "
+                  f"({steam_mod.shim_install_path()})")
+            print(f"Steam:        {'запущен' if st.steam_running else 'остановлен'}")
+            print(f"LaunchOptions: {st.current!r}")
+            print(f"Состояние:    {'включено' if st.installed else 'выключено'}")
+            if st.installed:
+                print()
+                print("Откат: polytopia-analyzer install-shim --disable")
+            else:
+                print()
+                print(steam_mod.manual_instructions())
+            return 0
+
+        if action == "enable":
+            shim = _ensure_shim_installed(args.shim)
+            res = steam_mod.enable(cfg, shim=shim, restart_steam=args.restart_steam,
+                                   force=args.force)
+            print(f"Включено чтение из игры: {res['installed']}")
+            print(f"Конфиг: {res['config']}")
+            print(f"Резервная копия: {res['backup']}")
+            if res["steam_was_running"] and not res["steam_stopped"]:
+                print()
+                print("ВАЖНО: Steam был запущен и держит конфиг в памяти — правка "
+                      "применится после перезапуска Steam (или используйте "
+                      "--restart-steam).")
+            elif res["steam_stopped"]:
+                print("Steam перезапущен — настройка уже действует.")
+            print()
+            print("Дальше: откройте реплей по ссылке из Steam, затем "
+                  "polytopia-analyzer import-inbox --watch")
+            return 0
+
+        if action == "disable":
+            res = steam_mod.disable(cfg, restart_steam=args.restart_steam, force=args.force)
+            prev = res["restored"]
+            print("Откат выполнен: " + (f"возвращено {prev!r}" if prev is not None
+                                        else "параметры запуска очищены"))
+            if res["steam_was_running"] and not res["steam_stopped"]:
+                print("Изменение применится после перезапуска Steam.")
+            return 0
+    except (steam_mod.SteamRunningError, steam_mod.SteamConfigError, FileNotFoundError) as e:
+        print(f"Ошибка: {e}")
+        return 1
+    return 2
+
+
 # ---------- web ----------
 
 def cmd_web(args: argparse.Namespace) -> int:
@@ -316,6 +391,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("input")
     p.add_argument("output")
     p.set_defaults(func=cmd_convert)
+
+    p = sub.add_parser("install-shim",
+                       help="включить/выключить чтение состояния через строку запуска Steam")
+    p.add_argument("action", nargs="?", choices=["enable", "disable", "status"],
+                   default="status", help="что сделать (по умолчанию status)")
+    p.add_argument("--config", default=None, help="путь к localconfig.vdf (по умолчанию авто)")
+    p.add_argument("--shim", default=None, help="путь к libpolyread_dump.so")
+    p.add_argument("--restart-steam", action="store_true",
+                   help="остановить Steam, записать настройку и запустить снова")
+    p.add_argument("--force", action="store_true",
+                   help="писать при работающем Steam / поверх чужого значения")
+    p.set_defaults(func=cmd_install_shim)
 
     p = sub.add_parser("import-inbox", help="импортировать снимки состояния игры (шим)")
     p.add_argument("--dir", default=None,

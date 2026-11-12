@@ -71,6 +71,74 @@ def test_import_inbox_creates_match(shim_inbox, tmp_path, capsys):
     assert "Победа: KOF" in printed
 
 
+VDF = """"UserLocalConfigStore"
+{
+\t"Software"
+\t{
+\t\t"Valve"
+\t\t{
+\t\t\t"Steam"
+\t\t\t{
+\t\t\t\t"apps"
+\t\t\t\t{
+\t\t\t\t\t"874390"
+\t\t\t\t\t{
+\t\t\t\t\t\t"LastPlayed"\t\t"1794524800"
+\t\t\t\t\t}
+\t\t\t\t\t"881100"
+\t\t\t\t\t{
+\t\t\t\t\t\t"Playtime"\t\t"177"
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}
+}
+"""
+
+
+@pytest.fixture
+def steam_env(tmp_path, monkeypatch):
+    from polytopia_analyzer import steam
+
+    cfg = tmp_path / "localconfig.vdf"
+    cfg.write_text(VDF, encoding="utf-8")
+    shim = tmp_path / "libpolyread_dump.so"
+    shim.write_bytes(b"\x7fELF fake")
+    monkeypatch.setattr(steam, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(steam, "is_steam_running", lambda: False)
+    monkeypatch.setattr(steam, "start_steam", lambda: None)
+    return cfg, shim
+
+
+def test_install_shim_enable_status_disable(steam_env, capsys):
+    cfg, shim = steam_env
+    rc = main(["install-shim", "enable", "--config", str(cfg), "--shim", str(shim)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Включено чтение" in out
+    assert '"LaunchOptions"' in cfg.read_text(encoding="utf-8")
+
+    rc = main(["install-shim", "status", "--config", str(cfg), "--shim", str(shim)])
+    assert rc == 0
+    assert "включено" in capsys.readouterr().out
+
+    rc = main(["install-shim", "disable", "--config", str(cfg)])
+    assert rc == 0
+    assert "Откат выполнен" in capsys.readouterr().out
+    assert '"LaunchOptions"' not in cfg.read_text(encoding="utf-8")
+
+
+def test_install_shim_refuses_when_steam_running(steam_env, monkeypatch, capsys):
+    from polytopia_analyzer import steam
+
+    cfg, shim = steam_env
+    monkeypatch.setattr(steam, "is_steam_running", lambda: True)
+    rc = main(["install-shim", "enable", "--config", str(cfg), "--shim", str(shim)])
+    assert rc == 1
+    assert "Steam запущен" in capsys.readouterr().out
+
+
 def test_import_inbox_empty_dir_fails(tmp_path, capsys):
     empty = tmp_path / "empty"
     empty.mkdir()

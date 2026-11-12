@@ -46,12 +46,18 @@ polytopia-analyzer open <ссылка> --launch      # реплей открое
 ничего не пишет: только чтение метаданных и полей.
 
 ```bash
-make -C shim && cp shim/libpolyread_dump.so ~/.local/share/polytopia-analyzer/bin/
-shim/install-wrapper.sh --enable              # временная обёртка (обратимо)
-polytopia-analyzer open <ссылка> --launch     # реплей откроется в Steam
-polytopia-analyzer import-inbox --watch       # матч пишется по ходу реплея
-shim/install-wrapper.sh --restore
+make -C shim
+polytopia-analyzer install-shim enable --restart-steam   # строка запуска в Steam
+polytopia-analyzer open <ссылка> --launch                # реплей откроется в Steam
+polytopia-analyzer import-inbox --watch                  # матч пишется по ходу реплея
+polytopia-analyzer install-shim disable --restart-steam   # откат
 ```
+
+`install-shim` пишет `LD_PRELOAD=… %command%` в параметры запуска игры в Steam
+(с резервной копией конфига и откатом). Steam держит конфиг в памяти, поэтому
+установщик останавливает и запускает его заново; без `--restart-steam` он
+откажется работать при запущенном Steam. Ручной вариант и путь через временную
+обёртку (`shim/install-wrapper.sh`) описаны в `docs/shim-dump.md`.
 
 В веб-интерфейсе то же самое делает карточка «Импорт из игры (шим)».
 Подробности: `docs/shim-probe.md` (что видно через API движка) и
@@ -104,7 +110,12 @@ polytopia-analyzer validate data/match.csv
 # Конвертация CSV <-> JSON
 polytopia-analyzer convert data/match.csv data/match.json
 
-# 5. Импорт снимков состояния игры (шим) — разово или следя за папкой
+# 5. Включить/выключить чтение из игры (строка запуска Steam)
+polytopia-analyzer install-shim status
+polytopia-analyzer install-shim enable --restart-steam
+polytopia-analyzer install-shim disable --restart-steam
+
+# 6. Импорт снимков состояния игры (шим) — разово или следя за папкой
 polytopia-analyzer import-inbox -o data/shim.json --title "Timeless Battles"
 polytopia-analyzer import-inbox --watch        # обновляет матч по ходу реплея
 ```
@@ -250,14 +261,15 @@ polytopia_analyzer/
 ├── report.py     # HTML-отчёт с plotly.js
 ├── webapp.py     # локальный веб-сервер (HTTP API)
 ├── importers/    # ocr.py — числа с табло; shim.py — снимки состояния игры
-├── cli.py        # analyze / template / open / convert / import-inbox / web
+├── steam.py      # параметры запуска Steam: включить/выключить шим, откат
+├── cli.py        # analyze / template / open / convert / install-shim / import-inbox / web
 └── assets/       # plotly-basic.min.js, webui.html
 ```
 
 ## Дорожная карта
 
 - [x] Чтение состояния игры шимом LD_PRELOAD на Linux (v0.2, M6.1–M6.3)
-- [ ] Установщик строки запуска Steam вместо временной обёртки (M6.4)
+- [x] Установщик строки запуска Steam вместо временной обёртки (v0.2, M6.4)
 - [ ] Адаптер экспорта PolyMod (JSON состояния из Steam-клиента)
 - [ ] Парсер `.state`-сейвов одиночной игры (LZ4 + бинарный формат)
 - [x] OCR-распознавание экрана счёта из игры/скриншотов (v0.2, M4)

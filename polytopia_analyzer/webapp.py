@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from . import __version__
 from .importers import ocr as ocr_mod
 from .importers import shim as shim_mod
+from . import steam as steam_mod
 from .links import extract_game_id, mobile_link, share_link, steam_link
 from .report import build_report
 from .validation import validate_match
@@ -148,6 +149,14 @@ class RequestHandler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "version": __version__})
         if path == "/api/matches":
             return self._json({"ok": True, "matches": self._list_matches()})
+        if path == "/api/steam-shim":
+            try:
+                st = steam_mod.status()
+                data = st.to_dict()
+                data["manual"] = steam_mod.manual_instructions()
+            except (steam_mod.SteamConfigError, steam_mod.SteamRunningError) as e:
+                return self._fail(503, str(e))
+            return self._json({"ok": True, **data})
         if path == "/api/inbox":
             directory = Path((qs.get("dir") or [""])[0]).expanduser() if qs.get("dir") \
                 else shim_mod.default_inbox_dir()
@@ -244,6 +253,25 @@ class RequestHandler(BaseHTTPRequestHandler):
             gid = extract_game_id(str(payload.get("link", "")))
             return self._json({"ok": True, "game_id": gid, "share": share_link(gid),
                                "mobile": mobile_link(gid), "steam": steam_link(gid)})
+        if path == "/api/steam-shim":
+            payload = self._json_body()
+            action = str(payload.get("action") or "status").lower()
+            force = bool(payload.get("force"))
+            try:
+                if action == "enable":
+                    res = steam_mod.enable(force=force)
+                    return self._json({"ok": True, "action": action, **res,
+                                       "need_restart": res["steam_was_running"]
+                                       and not res["steam_stopped"]})
+                if action == "disable":
+                    res = steam_mod.disable(force=force)
+                    return self._json({"ok": True, "action": action, **res,
+                                       "need_restart": res["steam_was_running"]
+                                       and not res["steam_stopped"]})
+            except (steam_mod.SteamConfigError, steam_mod.SteamRunningError,
+                    FileNotFoundError) as e:
+                return self._fail(409, str(e))
+            raise ValueError(f"Неизвестное действие: {action}")
         if path == "/api/inbox/import":
             raw = self._read_body()
             payload = json.loads(raw.decode("utf-8")) if raw.strip() else {}

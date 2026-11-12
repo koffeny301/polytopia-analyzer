@@ -11,9 +11,14 @@
 ```bash
 make                        # обе библиотеки
 ./run-probe.sh              # метаданные → ~/.local/share/polytopia-analyzer/probe/
-./install-wrapper.sh --enable
+
+# штатный путь: строка запуска Steam (веха 6.4)
+polytopia-analyzer install-shim enable --restart-steam
 xdg-open 'steam://run/874390//opengame?id=<uuid>'   # реплей из ссылки
-./install-wrapper.sh --restore
+polytopia-analyzer install-shim disable --restart-steam
+
+# резервный путь, если менять строку запуска нельзя
+./install-wrapper.sh --enable   # … --restore
 ```
 
 Дамп пишет `snapshot-<ход>.json` + `latest.json` в
