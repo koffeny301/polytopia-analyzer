@@ -1,0 +1,585 @@
+{
+ "source": "shim",
+ "captured": "2026-11-13",
+ "match": {
+  "title": "Timeless Battles",
+  "link": "https://share.polytopia.io/g/35b44c27-a0a2-4f52-3290-08df4019957a",
+  "mode": "Might",
+  "map": "Archipelago"
+ },
+ "note": "Снято шимом из живого GameState во время проигрывания реплея. Значения ходов совпадают с HUD на момент смены хода.",
+ "turns": [
+  {
+   "turn": 0,
+   "players": [
+    {
+     "id": 1,
+     "name": "KOF",
+     "tribe": 16,
+     "score": 565,
+     "end_score": 0,
+     "stars": 0,
+     "cities": 1,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 2,
+     "name": "Goylem",
+     "tribe": 15,
+     "score": 625,
+     "end_score": 0,
+     "stars": 3,
+     "cities": 1,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 255,
+     "name": "Nature",
+     "tribe": 1,
+     "score": 100,
+     "end_score": 0,
+     "stars": 0,
+     "cities": 0,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    }
+   ]
+  },
+  {
+   "turn": 1,
+   "players": [
+    {
+     "id": 1,
+     "name": "KOF",
+     "tribe": 16,
+     "score": 565,
+     "end_score": 0,
+     "stars": 0,
+     "cities": 1,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 2,
+     "name": "Goylem",
+     "tribe": 15,
+     "score": 625,
+     "end_score": 0,
+     "stars": 3,
+     "cities": 1,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 255,
+     "name": "Nature",
+     "tribe": 1,
+     "score": 100,
+     "end_score": 0,
+     "stars": 0,
+     "cities": 0,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    }
+   ]
+  },
+  {
+   "turn": 2,
+   "players": [
+    {
+     "id": 1,
+     "name": "KOF",
+     "tribe": 16,
+     "score": 595,
+     "end_score": 0,
+     "stars": 2,
+     "cities": 1,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 2,
+     "name": "Goylem",
+     "tribe": 15,
+     "score": 690,
+     "end_score": 0,
+     "stars": 0,
+     "cities": 1,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 255,
+     "name": "Nature",
+     "tribe": 1,
+     "score": 100,
+     "end_score": 0,
+     "stars": 0,
+     "cities": 0,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    }
+   ]
+  },
+  {
+   "turn": 3,
+   "players": [
+    {
+     "id": 1,
+     "name": "KOF",
+     "tribe": 16,
+     "score": 890,
+     "end_score": 0,
+     "stars": 4,
+     "cities": 2,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 2,
+     "name": "Goylem",
+     "tribe": 15,
+     "score": 735,
+     "end_score": 0,
+     "stars": 2,
+     "cities": 1,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 255,
+     "name": "Nature",
+     "tribe": 1,
+     "score": 100,
+     "end_score": 0,
+     "stars": 0,
+     "cities": 0,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    }
+   ]
+  },
+  {
+   "turn": 4,
+   "players": [
+    {
+     "id": 1,
+     "name": "KOF",
+     "tribe": 16,
+     "score": 945,
+     "end_score": 0,
+     "stars": 2,
+     "cities": 2,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 2,
+     "name": "Goylem",
+     "tribe": 15,
+     "score": 765,
+     "end_score": 0,
+     "stars": 6,
+     "cities": 1,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 255,
+     "name": "Nature",
+     "tribe": 1,
+     "score": 100,
+     "end_score": 0,
+     "stars": 0,
+     "cities": 0,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    }
+   ]
+  },
+  {
+   "turn": 5,
+   "players": [
+    {
+     "id": 1,
+     "name": "KOF",
+     "tribe": 16,
+     "score": 1255,
+     "end_score": 0,
+     "stars": 1,
+     "cities": 2,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 2,
+     "name": "Goylem",
+     "tribe": 15,
+     "score": 1160,
+     "end_score": 0,
+     "stars": 2,
+     "cities": 2,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 255,
+     "name": "Nature",
+     "tribe": 1,
+     "score": 100,
+     "end_score": 0,
+     "stars": 0,
+     "cities": 0,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    }
+   ]
+  },
+  {
+   "turn": 6,
+   "players": [
+    {
+     "id": 1,
+     "name": "KOF",
+     "tribe": 16,
+     "score": 1880,
+     "end_score": 0,
+     "stars": 0,
+     "cities": 4,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 2,
+     "name": "Goylem",
+     "tribe": 15,
+     "score": 1330,
+     "end_score": 0,
+     "stars": 5,
+     "cities": 2,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 255,
+     "name": "Nature",
+     "tribe": 1,
+     "score": 100,
+     "end_score": 0,
+     "stars": 0,
+     "cities": 0,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    }
+   ]
+  },
+  {
+   "turn": 7,
+   "players": [
+    {
+     "id": 1,
+     "name": "KOF",
+     "tribe": 16,
+     "score": 2050,
+     "end_score": 0,
+     "stars": 1,
+     "cities": 4,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 2,
+     "name": "Goylem",
+     "tribe": 15,
+     "score": 1450,
+     "end_score": 0,
+     "stars": 4,
+     "cities": 2,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 255,
+     "name": "Nature",
+     "tribe": 1,
+     "score": 100,
+     "end_score": 0,
+     "stars": 0,
+     "cities": 0,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    }
+   ]
+  },
+  {
+   "turn": 8,
+   "players": [
+    {
+     "id": 1,
+     "name": "KOF",
+     "tribe": 16,
+     "score": 2335,
+     "end_score": 0,
+     "stars": 0,
+     "cities": 4,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 2,
+     "name": "Goylem",
+     "tribe": 15,
+     "score": 1500,
+     "end_score": 0,
+     "stars": 0,
+     "cities": 2,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 255,
+     "name": "Nature",
+     "tribe": 1,
+     "score": 100,
+     "end_score": 0,
+     "stars": 0,
+     "cities": 0,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    }
+   ]
+  },
+  {
+   "turn": 9,
+   "players": [
+    {
+     "id": 1,
+     "name": "KOF",
+     "tribe": 16,
+     "score": 2460,
+     "end_score": 0,
+     "stars": 3,
+     "cities": 4,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 2,
+     "name": "Goylem",
+     "tribe": 15,
+     "score": 1605,
+     "end_score": 0,
+     "stars": 3,
+     "cities": 2,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 255,
+     "name": "Nature",
+     "tribe": 1,
+     "score": 100,
+     "end_score": 0,
+     "stars": 0,
+     "cities": 0,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    }
+   ]
+  },
+  {
+   "turn": 10,
+   "players": [
+    {
+     "id": 1,
+     "name": "KOF",
+     "tribe": 16,
+     "score": 2850,
+     "end_score": 0,
+     "stars": 6,
+     "cities": 5,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 2,
+     "name": "Goylem",
+     "tribe": 15,
+     "score": 2105,
+     "end_score": 0,
+     "stars": 0,
+     "cities": 3,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 255,
+     "name": "Nature",
+     "tribe": 1,
+     "score": 100,
+     "end_score": 0,
+     "stars": 0,
+     "cities": 0,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    }
+   ]
+  },
+  {
+   "turn": 11,
+   "players": [
+    {
+     "id": 1,
+     "name": "KOF",
+     "tribe": 16,
+     "score": 3770,
+     "end_score": 0,
+     "stars": 4,
+     "cities": 7,
+     "kills": 0,
+     "casualties": 1,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 2,
+     "name": "Goylem",
+     "tribe": 15,
+     "score": 2140,
+     "end_score": 0,
+     "stars": 0,
+     "cities": 3,
+     "kills": 1,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 255,
+     "name": "Nature",
+     "tribe": 1,
+     "score": 100,
+     "end_score": 0,
+     "stars": 0,
+     "cities": 0,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    }
+   ]
+  },
+  {
+   "turn": 12,
+   "players": [
+    {
+     "id": 1,
+     "name": "KOF",
+     "tribe": 16,
+     "score": 4485,
+     "end_score": 0,
+     "stars": 8,
+     "cities": 7,
+     "kills": 1,
+     "casualties": 2,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 2,
+     "name": "Goylem",
+     "tribe": 15,
+     "score": 2185,
+     "end_score": 0,
+     "stars": 2,
+     "cities": 3,
+     "kills": 2,
+     "casualties": 1,
+     "resigned_turn": -1,
+     "wiped": false
+    },
+    {
+     "id": 255,
+     "name": "Nature",
+     "tribe": 1,
+     "score": 100,
+     "end_score": 0,
+     "stars": 0,
+     "cities": 0,
+     "kills": 0,
+     "casualties": 0,
+     "resigned_turn": -1,
+     "wiped": false
+    }
+   ]
+  }
+ ]
+}

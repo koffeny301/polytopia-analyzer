@@ -1,16 +1,30 @@
-# Пробник 6.1 — чтение метаданных IL2CPP изнутри игры
+# Шим: чтение состояния Polytopia изнутри игры
 
-Одна `.so`, которая подгружается в процесс игры через `LD_PRELOAD` и выгружает
-список сборок, классов и полей. Ничего не пишет в игру, не вызывает её методов
-и не трогает экземпляры объектов — только метаданные.
+Две `.so`, обе подгружаются через `LD_PRELOAD` и работают только на чтение:
+ничего не пишут в игру, не вызывают её методов.
+
+| Файл | Веха | Что делает |
+|---|---|---|
+| `libpolyread_probe.so` | 6.1 | перечисляет сборки, классы и поля (`POLYREAD_PROBE=1`) |
+| `libpolyread_dump.so` | 6.2 | читает живой `GameState` и пишет снимки по ходам (`POLYREAD_DUMP=1`) |
 
 ```bash
-make            # libpolyread_probe.so
-./run-probe.sh  # запустить игру и снять выгрузку
+make                        # обе библиотеки
+./run-probe.sh              # метаданные → ~/.local/share/polytopia-analyzer/probe/
+./install-wrapper.sh --enable
+xdg-open 'steam://run/874390//opengame?id=<uuid>'   # реплей из ссылки
+./install-wrapper.sh --restore
 ```
 
-Результат — в `~/.local/share/polytopia-analyzer/probe/` (`probe.json`,
-`probe.log`, `classes.txt`).
+Дамп пишет `snapshot-<ход>.json` + `latest.json` в
+`~/.local/share/polytopia-analyzer/inbox/`. Подробности и результаты —
+`docs/shim-dump.md`.
+
+### Где живёт состояние
+
+`GameManager.instance.client.currentGameState` → `<CurrentTurn>`, `<PlayerStates>`
+(`score`, `currency`, `cities`, `kills`, `casualities`, `resignedTurn`, `tribe`).
+Поля ищутся по цепочке наследования: у `ReplayClient` своих полей нет.
 
 ## Переменные окружения
 
@@ -21,7 +35,14 @@ make            # libpolyread_probe.so
 | `POLYREAD_PROBE_ATTACH=1` | вызвать `il2cpp_thread_attach` (по умолчанию нет — валит процесс) |
 | `POLYREAD_PROBE_FORK=1` | опрос из дочернего процесса (не работает, оставлено для диагностики) |
 | `POLYREAD_PROBE_FORCE=1` | игнорировать проверку имени исполняемого файла |
-| `POLYTOPIA_DIR`, `POLYREAD_PROBE_DIR` | путь к игре / куда писать выгрузку |
+| `POLYREAD_DUMP=1` или `=/путь` | включает дамп состояния (6.2) |
+| `POLYREAD_DUMP_FIND=1` | только найти `GameState`, без снимков |
+| `POLYREAD_DUMP_SWEEP=1` | диагностический смотр объектного графа |
+| `POLYREAD_DUMP_FIELDS="A,B"` | напечатать поля указанных классов |
+| `POLYREAD_DUMP_WATCH=1` | 12 тактов наблюдения с журналом |
+| `POLYREAD_DUMP_DELAY=6` | пауза после загрузки движка, секунды |
+| `POLYREAD_DUMP_INTERVAL=300` | период опроса, мс |
+| `POLYTOPIA_DIR`, `POLYREAD_PROBE_DIR`, `POLYREAD_DUMP_DIR` | путь к игре / куда писать |
 
 ## Грабли, проверенные на 2.18.0.16751
 
