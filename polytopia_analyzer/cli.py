@@ -17,6 +17,7 @@ from .links import extract_game_id, mobile_link, share_link, steam_link
 from .models import Match, MatchMeta, Player
 from .report import build_report
 from .storage import CSV_COLUMNS, load_match, match_to_csv, save_match
+from .validation import validate_match
 
 
 # ---------- analyze ----------
@@ -51,6 +52,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         print(f"Ошибка: файл не найден: {inp}")
         return 1
     match = load_match(inp)
+    _print_validation(match)
     html = build_report(match, plotly_js=None) if args.cdn else build_report(match)
     out = Path(args.output) if args.output else inp.with_name(inp.stem + "_report.html")
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -59,6 +61,54 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     if args.open:
         webbrowser.open(out.resolve().as_uri())
     return 0
+
+
+# ---------- validate ----------
+
+def _fmt_issue(i) -> str:
+    loc = []
+    if i.turn is not None:
+        loc.append(f"ход {i.turn}")
+    if i.player:
+        loc.append(str(i.player))
+    where = ", ".join(loc)
+    return f"[{i.code}] {where + ': ' if where else ''}{i.message}"
+
+
+def _print_validation(match: Match) -> None:
+    rep = validate_match(match)
+    print(f"Проверка данных: ошибок {len(rep.errors)}, "
+          f"предупреждений {len(rep.warnings)}, инфо {len(rep.info)}")
+    for i in rep.errors[:5]:
+        print("  " + _fmt_issue(i))
+    for i in rep.warnings[:5]:
+        print("  " + _fmt_issue(i))
+    if len(rep.warnings) > 5:
+        print(f"  …и ещё {len(rep.warnings) - 5} предупреждений")
+    print()
+
+
+def cmd_validate(args: argparse.Namespace) -> int:
+    inp = Path(args.input)
+    if not inp.exists():
+        print(f"Ошибка: файл не найден: {inp}")
+        return 1
+    match = load_match(inp)
+    rep = validate_match(match)
+    print(f"Проверка: {inp}")
+    print(f"Ошибок: {len(rep.errors)}")
+    for i in rep.errors:
+        print("  " + _fmt_issue(i))
+    print(f"Предупреждений: {len(rep.warnings)}")
+    for i in rep.warnings:
+        print("  " + _fmt_issue(i))
+    print(f"Инфо: {len(rep.info)}")
+    for i in rep.info:
+        print("  " + _fmt_issue(i))
+    if rep.completeness:
+        comp = ", ".join(f"{n} {v * 100:.0f}%" for n, v in rep.completeness.items())
+        print(f"Полнота данных: {comp}")
+    return 1 if rep.has_errors else 0
 
 
 # ---------- template ----------
@@ -192,6 +242,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--link", default="", help="ссылка на реплей (share.polytopia.io/...)")
     p.add_argument("-o", "--output", default="match.csv", help="выходной CSV-файл")
     p.set_defaults(func=cmd_template)
+
+    p = sub.add_parser("validate", help="проверить данные матча без построения отчёта")
+    p.add_argument("input", help="файл матча (.csv или .json)")
+    p.set_defaults(func=cmd_validate)
 
     p = sub.add_parser("open", help="открыть реплей матча по ссылке share.polytopia.io")
     p.add_argument("link", help="ссылка на матч или UUID")

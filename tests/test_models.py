@@ -5,6 +5,7 @@ import pytest
 from polytopia_analyzer.models import Match, MatchMeta, Player, TurnRecord
 from polytopia_analyzer.storage import (
     load_match,
+    match_to_dict,
     match_from_csv,
     match_from_json,
     match_to_csv,
@@ -177,3 +178,68 @@ def test_csv_writes_int_like_floats_without_decimal_point():
     text = match_to_csv(m)
     assert "520.0" not in text
     assert "2.5" in text
+
+
+def test_csv_tracks_filled_fields():
+    csv_text = """# player: A
+turn,player,score,income,army,cities,kills,losses,captured,lost_cities,damage
+1,A,100,,1,,,,,,
+"""
+    m = match_from_csv(csv_text)
+    assert m.records[0].filled == {"score", "army"}
+
+
+def test_csv_missing_column_not_filled():
+    csv_text = """# player: A
+turn,player,score
+1,A,100
+"""
+    m = match_from_csv(csv_text)
+    assert m.records[0].filled == {"score"}
+
+
+def test_json_tracks_filled_fields_explicit_zero_counts():
+    data = ('{"players":[{"name":"A"}],"turns":'
+            '[{"turn":1,"player":"A","score":5,"kills":0}]}')
+    m = match_from_json(data)
+    assert m.records[0].filled == {"score", "kills"}
+
+
+def test_to_dict_omits_unfilled_metrics():
+    data = ('{"players":[{"name":"A"}],"turns":'
+            '[{"turn":1,"player":"A","score":5}]}')
+    d = match_to_dict(match_from_json(data))
+    assert set(d["turns"][0]) == {"turn", "player", "score"}
+
+
+def test_csv_roundtrip_preserves_empty_cells():
+    csv_text = """# player: A
+turn,player,score,income,army,cities,kills,losses,captured,lost_cities,damage
+1,A,100,,1,,,,,,
+"""
+    m = match_from_csv(csv_text)
+    out = match_to_csv(m)
+    m2 = match_from_csv(out)
+    assert m2.records[0].filled == {"score", "army"}
+    assert m2.records[0].score == 100.0
+
+
+def test_programmatic_record_filled_none_serializes_all():
+    m = make_match()
+    assert m.records[0].filled is None
+    d = match_to_dict(m)
+    assert "kills" in d["turns"][0]
+    row = [ln for ln in match_to_csv(m).splitlines() if ln.startswith("1,Вася")][0]
+    assert row.count(",") == 10
+
+
+def test_meta_source_and_verified_roundtrip():
+    m = make_match()
+    m.meta.source = "polymod"
+    m.meta.verified = "2026-11-12"
+    m2 = match_from_json(match_to_json(m))
+    assert m2.meta.source == "polymod"
+    assert m2.meta.verified == "2026-11-12"
+    m3 = match_from_csv(match_to_csv(m))
+    assert m3.meta.source == "polymod"
+    assert m3.meta.verified == "2026-11-12"

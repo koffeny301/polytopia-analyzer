@@ -15,7 +15,8 @@ DELTA_FIELDS = ("kills", "losses", "captured", "lost_cities", "damage")
 METRIC_FIELDS = SNAPSHOT_FIELDS + DELTA_FIELDS
 INT_FIELDS = ("army", "cities", "kills", "losses", "captured", "lost_cities")
 FLOAT_FIELDS = ("score", "income", "damage")
-META_FIELDS = ("title", "date", "mode", "map", "link", "turn_limit", "notes")
+META_FIELDS = ("title", "date", "mode", "map", "link", "turn_limit", "notes",
+               "source", "verified")
 PLAYER_FIELDS = ("name", "tribe", "color", "is_human")
 
 
@@ -44,6 +45,9 @@ class TurnRecord:
     captured: int = 0
     lost_cities: int = 0
     damage: float = 0.0
+    # какие метрики были явно заполнены (None = все; проставляется парсером,
+    # нужно валидации, чтобы отличать «ноль» от «неизвестно»)
+    filled: Optional[set] = field(default=None, compare=False, repr=False)
 
 
 @dataclass
@@ -57,6 +61,10 @@ class MatchMeta:
     link: str = ""
     turn_limit: Optional[int] = None
     notes: str = ""
+    # происхождение данных: "" (=ручной ввод) / "polymod" / "ocr"
+    source: str = ""
+    # дата принятия предупреждений валидации (пусто = черновик)
+    verified: str = ""
 
 
 @dataclass

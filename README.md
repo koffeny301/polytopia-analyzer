@@ -58,6 +58,9 @@ polytopia-analyzer open "https://share.polytopia.io/g/<uuid>" [--launch]
 polytopia-analyzer analyze data/match.csv                 # -> data/match_report.html
 polytopia-analyzer analyze data/match.csv -o report.html --open
 
+# 4. Проверить данные матча (ошибки/предупреждения/полнота)
+polytopia-analyzer validate data/match.csv
+
 # Конвертация CSV <-> JSON
 polytopia-analyzer convert data/match.csv data/match.json
 ```
@@ -85,6 +88,9 @@ polytopia-analyzer web --port 9000 --no-browser
 - **загрузка файла** CSV/JSON прямо в браузер;
 - **ссылка на реплей**: вставили `share.polytopia.io/g/...` — получили
   ссылки для Steam/мобильной версии с кнопками «копировать»;
+- **панель «Проверка данных»**: ошибки/предупреждения/полнота в реальном
+  времени; клик по замечанию ведёт к ячейке, подозрительные ячейки
+  подсвечиваются; сохранение с ошибками блокируется;
 - **«📊 Построить отчёт»** — тот самый HTML-отчёт, открывается в новой вкладке;
 - **экспорт** в CSV/JSON, сохранение по Ctrl+S.
 
@@ -161,7 +167,7 @@ turn,player,score,income,army,cities,kills,losses,captured,lost_cities,damage
 ## Разработка
 
 ```bash
-.venv/bin/pytest -q        # 43 теста
+.venv/bin/pytest -q        # 94 теста
 ```
 
 Принцип работы, внутреннее устройство, формат данных и точки расширения
@@ -175,6 +181,7 @@ polytopia_analyzer/
 ├── storage.py    # CSV/JSON: парсинг, сериализация, приведение типов
 ├── links.py      # ссылки share.polytopia.io -> uuid -> deep-links
 ├── analysis.py   # производная статистика, места, лидеры, награды
+├── validation.py # правила проверки данных (ошибки/предупреждения/инфо)
 ├── report.py     # HTML-отчёт с plotly.js
 ├── webapp.py     # локальный веб-сервер (HTTP API)
 ├── cli.py        # analyze / template / open / convert / web

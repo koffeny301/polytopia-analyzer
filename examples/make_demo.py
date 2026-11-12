@@ -78,9 +78,14 @@ def build_match() -> Match:
                     damage = max(damage, 15.0)
                 elif name == loser:
                     lost_cities, losses = 1, max(losses, 2)
+            if t in CITY_GROWTH.get(name, []):
+                captured += 1  # захват деревни — тоже захват города
+                damage = max(damage, 6.0)
             cities[name] = cities_at(name, t)
             army_base = 1 + int(t * 0.45) + cities[name]
             army = max(0, army_base + rnd.randint(-2, 2) + (2 if war else 0))
+            prev_army = records[name][-1].army if records[name] else army
+            army = min(army, prev_army + max(0, int(income)))  # не больше, чем куплено
             scores[name] += gain
             records[name].append(TurnRecord(
                 turn=t, player=name,

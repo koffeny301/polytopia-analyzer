@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from . import __version__
 from .links import extract_game_id, mobile_link, share_link, steam_link
 from .report import build_report
+from .validation import validate_match
 from .storage import (
     load_match,
     match_from_csv,
@@ -189,6 +190,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             html = (build_report(match, plotly_js=None) if payload.get("cdn")
                     else build_report(match))
             return self._json({"ok": True, "html": html})
+        if path == "/api/validate":
+            payload = self._json_body()
+            match = match_from_dict(payload.get("match") or {})
+            rep = validate_match(match)
+            return self._json({"ok": True, **rep.to_dict()})
         if path == "/api/upload":
             text = self._read_body().decode("utf-8", errors="replace")
             fmt = (qs.get("format") or ["auto"])[0].lower()
@@ -211,6 +217,14 @@ class RequestHandler(BaseHTTPRequestHandler):
             p = safe_match_path(self.data_dir, path[len("/api/matches/"):])
             payload = self._json_body()
             match = match_from_dict(payload.get("match") or payload)
+            rep = validate_match(match)
+            if rep.has_errors:
+                return self._json({
+                    "ok": False,
+                    "error": "Данные не прошли проверку: "
+                             + "; ".join(i.message for i in rep.errors[:3]),
+                    "issues": [i.to_dict() for i in rep.errors],
+                }, 400)
             save_match(match, p)
             return self._json({"ok": True, "name": p.name})
         self._fail(404, f"Неизвестный маршрут: {path}")

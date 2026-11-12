@@ -186,3 +186,42 @@ def test_safe_match_path_rejects_bad_names(tmp_path):
     p = webapp.safe_match_path(tmp_path, "ok")
     assert p.parent == tmp_path.resolve()
     assert p.name == "ok.json"
+
+
+CITY_IMBALANCE = {
+    "meta": {"title": "Дисбаланс"},
+    "players": [{"name": "A"}],
+    "turns": [
+        {"turn": 1, "player": "A", "score": 100, "cities": 1},
+        {"turn": 2, "player": "A", "score": 200, "cities": 1, "captured": 1, "lost_cities": 0},
+    ],
+}
+
+
+def test_validate_endpoint_returns_warnings(base):
+    url, _ = base
+    s, b = req(url + "/api/validate", "POST", {"match": CITY_IMBALANCE})
+    assert s == 200
+    d = jload(b)
+    assert d["ok"] is True
+    assert any(i["code"] == "W_CITY_BALANCE" for i in d["warnings"])
+    assert "A" in d["completeness"]
+
+
+def test_save_rejects_errors_with_issues(base):
+    url, data_dir = base
+    bad = json.loads(json.dumps(MATCH))
+    bad["turns"][0]["score"] = -5
+    s, b = req(url + "/api/matches/neg", "POST", {"match": bad})
+    assert s == 400
+    d = jload(b)
+    assert d["ok"] is False
+    assert any(i["code"] == "E_NEGATIVE" for i in d["issues"])
+    assert not (data_dir / "neg.json").exists()
+
+
+def test_save_allows_warnings(base):
+    url, data_dir = base
+    s, b = req(url + "/api/matches/warn", "POST", {"match": CITY_IMBALANCE})
+    assert s == 200
+    assert (data_dir / "warn.json").exists()

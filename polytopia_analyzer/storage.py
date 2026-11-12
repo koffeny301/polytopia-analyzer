@@ -75,10 +75,25 @@ def _coerce_record_fields(raw: dict) -> dict:
     out["turn"] = int(turn)
     if out["turn"] != turn:
         raise ValueError(f"Номер хода должен быть целым: {raw['turn']!r}")
+    filled = {f for f in METRIC_FIELDS
+              if raw.get(f) is not None and str(raw.get(f)).strip() != ""}
     for f in METRIC_FIELDS:
         v = _to_number(raw.get(f), f)
         out[f] = int(v) if f in INT_FIELDS else float(v)
-    return out
+    return out, filled
+
+
+def _record_from_raw(raw: dict) -> TurnRecord:
+    fields, filled = _coerce_record_fields(raw)
+    return TurnRecord(**fields, filled=filled)
+
+
+def _record_to_dict(r: TurnRecord) -> dict:
+    d: dict = {"turn": r.turn, "player": r.player}
+    for f in METRIC_FIELDS:
+        if r.filled is None or f in r.filled:
+            d[f] = getattr(r, f)
+    return d
 
 
 def _player_from_mapping(raw: dict) -> Player:
@@ -110,7 +125,7 @@ def _meta_from_mapping(raw: dict) -> MatchMeta:
 def match_to_dict(match: Match) -> dict:
     meta = {k: v for k, v in asdict(match.meta).items() if v not in ("", None)}
     players = [asdict(p) for p in match.players]
-    turns = [asdict(r) for r in sorted(match.records, key=lambda r: (r.turn, r.player))]
+    turns = [_record_to_dict(r) for r in sorted(match.records, key=lambda r: (r.turn, r.player))]
     return {"meta": meta, "players": players, "turns": turns}
 
 
@@ -119,7 +134,7 @@ def match_from_dict(data: dict) -> Match:
         meta=_meta_from_mapping(data.get("meta") or {}),
         players=[_player_from_mapping(p) for p in data.get("players") or []],
         records=[
-            TurnRecord(**_coerce_record_fields(t))
+            _record_from_raw(t)
             for t in data.get("turns") or []
             if _has_metrics(t)
         ],
@@ -163,7 +178,12 @@ def match_to_csv(match: Match) -> str:
     writer = csv.writer(buf)
     writer.writerow(CSV_COLUMNS)
     for r in sorted(match.records, key=lambda r: (r.turn, r.player)):
-        row = [_fmt_cell(getattr(r, col)) for col in CSV_COLUMNS]
+        row = [
+            "" if (col not in ("turn", "player")
+                   and r.filled is not None and col not in r.filled)
+            else _fmt_cell(getattr(r, col))
+            for col in CSV_COLUMNS
+        ]
         writer.writerow(row)
     return buf.getvalue()
 
@@ -227,7 +247,7 @@ def _parse_csv_table(data_lines: list[str]) -> list[TurnRecord]:
         if not _has_metrics(clean):
             continue  # незаполненная строка (например, будущий ход из шаблона)
         try:
-            records.append(TurnRecord(**_coerce_record_fields(clean)))
+            records.append(_record_from_raw(clean))
         except ValueError as e:
             raise ValueError(f"CSV, строка {i}: {e}") from e
     return records

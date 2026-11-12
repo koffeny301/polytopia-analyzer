@@ -102,6 +102,16 @@ table#grid td input { width:78px; padding:4px 6px; font-size:12.5px; border-radi
 #toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
 #toast.error { border-color:var(--red); }
 
+/* валидация */
+.issue { border-left:3px solid var(--muted); padding:5px 8px; margin:5px 0; font-size:12px;
+         border-radius:0 7px 7px 0; background:#191c36; cursor:pointer; }
+.issue b { font-size:10.5px; letter-spacing:.3px; }
+.issue.sev-error { border-color:var(--red); }   .issue.sev-error b   { color:var(--red); }
+.issue.sev-warning { border-color:#e6a700; }    .issue.sev-warning b { color:#e6a700; }
+.issue.sev-info { border-color:#4e79a7; }       .issue.sev-info b    { color:#7aa7dd; }
+#validation-issues { max-height:230px; overflow:auto; margin-top:6px; }
+#grid input.warn-input { border-color:#e6a700; background:rgba(230,167,0,.16); }
+
 footer { text-align:center; color:var(--muted); font-size:11px; padding:14px; }
 @media (max-width: 980px) { main { flex-direction:column; } aside { width:100%; position:static; } }
 </style>
@@ -135,6 +145,13 @@ footer { text-align:center; color:var(--muted); font-size:11px; padding:14px; }
     <input type="text" id="link-input" placeholder="https://share.polytopia.io/g/…">
     <div style="margin-top:8px"><button id="btn-link">Разобрать ссылку</button></div>
     <div id="link-result"></div>
+  </section>
+
+  <section class="card">
+    <h3>Проверка данных</h3>
+    <div id="validation-summary" class="hint">—</div>
+    <div id="validation-issues"></div>
+    <div style="margin-top:8px"><button id="btn-verify" style="display:none">✓ Принять предупреждения</button></div>
   </section>
 
   <section class="card">
@@ -357,6 +374,8 @@ function readMeta() {
   set("map", val("m-map")); set("link", val("m-link")); set("notes", val("m-notes"));
   const tl = parseInt(val("m-turn-limit"), 10);
   if (!Number.isNaN(tl) && tl > 0) meta.turn_limit = tl;
+  if (state.match.meta.source) meta.source = state.match.meta.source;
+  if (state.match.meta.verified) meta.verified = state.match.meta.verified;
   return meta;
 }
 
@@ -368,6 +387,7 @@ function renderAll() {
   renderFilterOptions();
   renderGrid();
   updateTitleBar();
+  scheduleValidation();
 }
 
 function setMetaForm(meta) {
@@ -545,6 +565,71 @@ function renamePlayerKeys(oldName, newName) {
   state.recMap = next;
 }
 
+/* ---------- валидация ---------- */
+
+let validateTimer = null;
+let lastIssues = [];
+
+function scheduleValidation() {
+  clearTimeout(validateTimer);
+  validateTimer = setTimeout(runValidation, 600);
+}
+
+async function runValidation() {
+  if (!state.match.players.length || (!state.recMap.size && !state.currentName)) {
+    renderValidation(null);
+    return;
+  }
+  let m;
+  try { m = collectMatch(); } catch (e) { renderValidation(null, e.message); return; }
+  try {
+    renderValidation(await postJson("/api/validate", { match: m }));
+  } catch (e) { renderValidation(null, e.message); }
+}
+
+function renderValidation(rep, localError) {
+  const sum = $("validation-summary"), list = $("validation-issues"), btn = $("btn-verify");
+  document.querySelectorAll("#grid input.warn-input").forEach(i => i.classList.remove("warn-input"));
+  lastIssues = [];
+  if (localError) {
+    sum.innerHTML = `<span style="color:var(--red)">${esc(localError)}</span>`;
+    list.innerHTML = ""; btn.style.display = "none";
+    return;
+  }
+  if (!rep) {
+    sum.innerHTML = '<span class="hint">Заполните данные — проверка запустится автоматически</span>';
+    list.innerHTML = ""; btn.style.display = "none";
+    return;
+  }
+  const ne = rep.errors.length, nw = rep.warnings.length, ni = rep.info.length;
+  const comp = Object.entries(rep.completeness || {})
+    .map(([p, v]) => `${esc(p)}: ${Math.round(v * 100)}%`).join(" · ");
+  sum.innerHTML =
+    `<b style="color:${ne ? "var(--red)" : "var(--green)"}">ошибок: ${ne}</b> · ` +
+    `предупреждений: ${nw} · инфо: ${ni}` +
+    (comp ? `<div class="hint" style="margin-top:3px">Полнота: ${comp}</div>` : "") +
+    (state.match.meta.verified ? `<div class="hint">✓ предупреждения приняты ${esc(state.match.meta.verified)}</div>` : "");
+  lastIssues = [...rep.errors, ...rep.warnings, ...rep.info].slice(0, 60);
+  list.innerHTML = lastIssues.map((it, i) => `
+    <div class="issue sev-${it.severity}" data-i="${i}" title="Нажмите, чтобы перейти к ячейке">
+      <b>${it.code}</b>${it.turn != null ? ` · ход ${it.turn}` : ""}${it.player ? ` · ${esc(it.player)}` : ""}
+      <div>${esc(it.message)}</div>
+    </div>`).join("");
+  btn.style.display = (nw > 0 && !state.match.meta.verified) ? "" : "none";
+  for (const it of lastIssues) {
+    if (it.severity === "info" || it.turn == null || !it.player || !it.metric) continue;
+    const inp = document.querySelector(`#grid input[data-key="${CSS.escape(it.turn + "|" + it.player)}"][data-metric="${it.metric}"]`);
+    if (inp) inp.classList.add("warn-input");
+  }
+}
+
+function focusIssue(el) {
+  const it = lastIssues[Number(el.dataset.i)];
+  if (!it || it.turn == null || !it.player) return;
+  const inp = document.querySelector(`#grid input[data-key="${CSS.escape(it.turn + "|" + it.player)}"][data-metric="${it.metric || "score"}"]`);
+  if (inp) { inp.scrollIntoView({ block: "center" }); inp.focus(); }
+}
+
 /* ---------- события ---------- */
 
 function wireEvents() {
@@ -555,6 +640,17 @@ function wireEvents() {
   $("link-input").addEventListener("keydown", e => { if (e.key === "Enter") parseLink(); });
   $("btn-csv").onclick = () => exportMatch("csv");
   $("btn-json").onclick = () => exportMatch("json");
+
+  $("validation-issues").addEventListener("click", e => {
+    const el = e.target.closest(".issue");
+    if (el) focusIssue(el);
+  });
+  $("btn-verify").onclick = () => {
+    state.match.meta.verified = new Date().toISOString().slice(0, 10);
+    markDirty();
+    runValidation();
+    toast("Предупреждения приняты — не забудьте сохранить (Ctrl+S)");
+  };
   $("g-filter").onchange = renderGrid;
 
   $("btn-new").onclick = () => {
@@ -655,6 +751,7 @@ function wireEvents() {
     const tr = inp.closest("tr");
     tr.classList.toggle("filled", METRICS.some(m => String(rec[m] ?? "").trim() !== ""));
     markDirty();
+    scheduleValidation();
   });
 
   // список матчей

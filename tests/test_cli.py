@@ -104,3 +104,26 @@ def test_template_partial_fill_analyze_ignores_empty_turns(tmp_path, capsys):
     assert "Победа: P" in summary
     assert "250" in summary
     assert report.exists()
+
+
+def test_cmd_validate_reports_counts(sample_csv, capsys):
+    rc = main(["validate", str(sample_csv)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "Ошибок: 0" in out
+    assert "Предупреждений: 1" in out  # у Бота cities не сходится с lost_cities
+
+
+def test_cmd_validate_errors_exit_1(tmp_path, capsys):
+    p = tmp_path / "bad.csv"
+    p.write_text("# player: A\nturn,player,score\n1,A,-5\n", encoding="utf-8")
+    rc = main(["validate", str(p)])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "E_NEGATIVE" in out
+
+
+def test_analyze_prints_validation_summary(sample_csv, tmp_path, capsys):
+    rc = main(["analyze", str(sample_csv), "-o", str(tmp_path / "r.html")])
+    assert rc == 0
+    assert "Проверка данных" in capsys.readouterr().out
