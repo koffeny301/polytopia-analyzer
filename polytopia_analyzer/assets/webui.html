@@ -134,6 +134,25 @@ table#grid td input { width:78px; padding:4px 6px; font-size:12.5px; border-radi
 #validation-issues { max-height:230px; overflow:auto; margin-top:6px; }
 #grid input.warn-input { border-color:#e6a700; background:rgba(230,167,0,.16); }
 
+/* OCR финального табло (M4) */
+#ocr-dialog { position:fixed; inset:0; background:rgba(5,6,15,.7); z-index:100;
+  display:flex; align-items:center; justify-content:center; }
+#ocr-dialog.hidden { display:none; }
+#ocr-panel { background:var(--panel); border:1px solid var(--gold); border-radius:14px;
+  padding:22px; width:min(880px, 95vw); max-height:92vh; overflow:auto; }
+#ocr-panel h3 { margin:0 0 10px; color:var(--gold); font-family:Georgia,serif; }
+#ocr-image-wrap { position:relative; margin:10px auto; border:1px solid var(--border);
+  border-radius:8px; overflow:hidden; }
+#ocr-image-wrap:empty { display:none; }
+#ocr-image { display:block; width:100%; }
+.ocr-box { position:absolute; border:2px solid var(--gold); border-radius:4px;
+  cursor:pointer; background:rgba(212,175,55,.12); }
+.ocr-box:hover { background:rgba(212,175,55,.32); }
+.ocr-box.selected { border-color:var(--green); background:rgba(89,217,127,.22); }
+#ocr-rows td { padding:4px 6px; }
+#ocr-rows input[type=number] { width:86px; }
+.ocr-error { color:var(--red); }
+
 footer { text-align:center; color:var(--muted); font-size:11px; padding:14px; }
 @media (max-width: 980px) { main { flex-direction:column; } aside { width:100%; position:static; } }
 </style>
@@ -160,6 +179,18 @@ footer { text-align:center; color:var(--muted); font-size:11px; padding:14px; }
       📂 Загрузить файл CSV/JSON
       <input type="file" id="file-input" accept=".csv,.json,.txt" style="display:none">
     </label>
+  </section>
+
+  <section class="card">
+    <h3>Скриншот табло (OCR)</h3>
+    <label class="hint" style="display:block;cursor:pointer">
+      🖼️ Загрузить скриншот финального табло
+      <input type="file" id="ocr-file" accept="image/*" style="display:none">
+    </label>
+    <div class="hint" style="margin-top:8px">
+      OCR найдёт числа, а вы привяжете их к игрокам и метрикам.
+      Нужен системный tesseract и pip install polytopia-match-analyzer[ocr].
+    </div>
   </section>
 
   <section class="card">
@@ -253,6 +284,25 @@ footer { text-align:center; color:var(--muted); font-size:11px; padding:14px; }
     <div class="modal-actions">
       <button id="np-cancel">Отмена</button>
       <button id="np-create" class="gold">Создать</button>
+    </div>
+  </div>
+</div>
+
+<div id="ocr-dialog" class="hidden">
+  <div id="ocr-panel">
+    <h3>Привязка чисел с табло</h3>
+    <div id="ocr-status" class="hint"></div>
+    <div id="ocr-image-wrap"></div>
+    <table id="ocr-table" style="width:100%">
+      <thead><tr>
+        <th style="width:30px">✓</th><th>Число</th><th>Игрок</th>
+        <th>Метрика</th><th>Ход</th><th title="уверенность OCR">%</th>
+      </tr></thead>
+      <tbody id="ocr-rows"></tbody>
+    </table>
+    <div class="modal-actions">
+      <button id="ocr-cancel">Отмена</button>
+      <button id="ocr-apply" class="gold" disabled>Применить</button>
     </div>
   </div>
 </div>
@@ -794,6 +844,96 @@ function focusIssue(el) {
   if (inp) { inp.scrollIntoView({ block: "center" }); inp.focus(); }
 }
 
+/* ---------- OCR финального табло (M4) ---------- */
+
+let ocrState = null;  // {dataUrl, width, height, numbers}
+
+function closeOcrDialog() { $("ocr-dialog").classList.add("hidden"); ocrState = null; }
+
+async function ocrFileChosen(file) {
+  if (!file) return;
+  if (!state.match.players.length) return toast("Сначала создайте матч и укажите игроков", true);
+  $("ocr-status").textContent = "Распознавание…";
+  $("ocr-status").classList.remove("ocr-error");
+  $("ocr-image-wrap").innerHTML = "";
+  $("ocr-rows").innerHTML = "";
+  $("ocr-apply").disabled = true;
+  $("ocr-dialog").classList.remove("hidden");
+  try {
+    const dataUrl = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result);
+      r.onerror = () => rej(new Error("Не удалось прочитать файл"));
+      r.readAsDataURL(file);
+    });
+    const rep = await postJson("/api/ocr", { image_b64: dataUrl });
+    ocrState = { dataUrl, width: rep.width, height: rep.height, numbers: rep.numbers };
+    renderOcr();
+  } catch (e) {
+    $("ocr-status").textContent = e.message;
+    $("ocr-status").classList.add("ocr-error");
+  }
+}
+
+function renderOcr() {
+  const { dataUrl, width, height, numbers } = ocrState;
+  $("ocr-status").textContent = numbers.length
+    ? `Найдено чисел: ${numbers.length}. Кликните число на картинке (или отметьте строку), укажите игрока, метрику и ход — затем «Применить».`
+    : "Числа не найдены. Попробуйте более чёткий скриншот или заполните таблицу вручную.";
+  $("ocr-image-wrap").innerHTML = `<img id="ocr-image" src="${dataUrl}" alt="табло">` +
+    numbers.map((n, i) =>
+      `<div class="ocr-box" data-i="${i}" title="уверенность ${n.conf}%"
+        style="left:${(n.x / width * 100).toFixed(2)}%;top:${(n.y / height * 100).toFixed(2)}%;width:${(n.w / width * 100).toFixed(2)}%;height:${(n.h / height * 100).toFixed(2)}%"></div>`).join("");
+  // картинка не выше 42% экрана: таблица привязки должна быть видна без прокрутки
+  const maxH = Math.round(window.innerHeight * 0.42);
+  const wrapW = Math.min(640, Math.round(maxH * width / height),
+                         $("ocr-panel").clientWidth - 46);
+  $("ocr-image-wrap").style.width = Math.max(wrapW, 120) + "px";
+  const players = state.match.players;
+  const defTurn = state.match.meta.turn_limit || state.turnsCount;
+  $("ocr-rows").innerHTML = numbers.map((n, i) => `
+    <tr data-i="${i}">
+      <td class="center"><input type="checkbox" data-f="use"></td>
+      <td><input type="number" data-f="value" value="${n.value}"></td>
+      <td><select data-f="player">${players.map(p => `<option>${esc(p.name)}</option>`).join("")}</select></td>
+      <td><select data-f="metric">${METRICS.map(m =>
+        `<option value="${m}" ${m === "score" ? "selected" : ""}>${METRIC_LABELS[m]}</option>`).join("")}</select></td>
+      <td><input type="number" data-f="turn" value="${defTurn}" min="1" max="500" style="width:70px"></td>
+      <td class="hint">${n.conf}</td>
+    </tr>`).join("");
+  $("ocr-apply").disabled = !numbers.length;
+}
+
+function applyOcr() {
+  if (!ocrState) return;
+  const rows = [...document.querySelectorAll("#ocr-rows tr")]
+    .filter(tr => tr.querySelector('input[data-f="use"]').checked);
+  if (!rows.length) return toast("Отметьте хотя бы одно число", true);
+  let maxTurn = 0;
+  const updates = [];
+  for (const tr of rows) {
+    const value = toNum(tr.querySelector('input[data-f="value"]').value);
+    const player = tr.querySelector('select[data-f="player"]').value;
+    const metric = tr.querySelector('select[data-f="metric"]').value;
+    const turn = parseInt(tr.querySelector('input[data-f="turn"]').value, 10);
+    if (value === null || Number.isNaN(value)) return toast("Пустое или некорректное значение в отмеченной строке", true);
+    if (!Number.isInteger(turn) || turn < 1 || turn > 500) return toast("Некорректный номер хода в отмеченной строке", true);
+    updates.push({ turn, player, metric, value });
+    maxTurn = Math.max(maxTurn, turn);
+  }
+  for (const u of updates) {
+    const k = key(u.turn, u.player);
+    if (!state.recMap.has(k)) state.recMap.set(k, Object.fromEntries(METRICS.map(m => [m, ""])));
+    state.recMap.get(k)[u.metric] = String(u.value);
+  }
+  if (maxTurn > state.turnsCount) { state.turnsCount = maxTurn; $("g-turns").value = maxTurn; }
+  state.match.meta.source = "ocr";
+  closeOcrDialog();
+  renderAll();
+  markDirty();
+  toast(`Применено значений: ${updates.length} (источник: OCR). Проверьте данные и сохраните.`);
+}
+
 /* ---------- события ---------- */
 
 function wireEvents() {
@@ -804,6 +944,29 @@ function wireEvents() {
   $("link-input").addEventListener("keydown", e => { if (e.key === "Enter") parseLink(); });
   $("btn-csv").onclick = () => exportMatch("csv");
   $("btn-json").onclick = () => exportMatch("json");
+
+  // OCR финального табло (M4)
+  $("ocr-file").addEventListener("change", e => {
+    const f = e.target.files[0]; e.target.value = ""; ocrFileChosen(f);
+  });
+  $("ocr-cancel").onclick = closeOcrDialog;
+  $("ocr-apply").onclick = applyOcr;
+  $("ocr-dialog").addEventListener("click", e => { if (e.target.id === "ocr-dialog") closeOcrDialog(); });
+  $("ocr-image-wrap").addEventListener("click", e => {
+    const box = e.target.closest(".ocr-box"); if (!box) return;
+    const tr = document.querySelector(`#ocr-rows tr[data-i="${box.dataset.i}"]`);
+    if (!tr) return;
+    const cb = tr.querySelector('input[data-f="use"]');
+    cb.checked = !cb.checked;
+    box.classList.toggle("selected", cb.checked);
+    tr.scrollIntoView({ block: "nearest" });
+  });
+  $("ocr-rows").addEventListener("change", e => {
+    if (e.target.dataset.f !== "use") return;
+    const tr = e.target.closest("tr");
+    const box = document.querySelector(`.ocr-box[data-i="${tr.dataset.i}"]`);
+    if (box) box.classList.toggle("selected", e.target.checked);
+  });
 
   $("validation-issues").addEventListener("click", e => {
     const el = e.target.closest(".issue");

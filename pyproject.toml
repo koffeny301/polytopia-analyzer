@@ -12,6 +12,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+ocr = ["pillow>=10", "pytesseract>=0.3.10"]
 
 [project.scripts]
 polytopia-analyzer = "polytopia_analyzer.cli:main"

@@ -88,6 +88,10 @@ polytopia-analyzer web --port 9000 --no-browser
   одного хода для всех игроков, ввод без мыши (Enter — дальше, Ctrl+Enter —
   следующий ход, Esc — таблица), прогресс заполнения и справка по метрикам
   ([docs/metrics.md](docs/metrics.md));
+- **OCR финального табло**: кнопка «📷 Загрузить скриншот табло» — числа
+  распознаются локально (tesseract), затем вы кликаете число на картинке
+  и указываете игрока/метрику/ход; сомнительные распознавания видны по
+  колонке уверенности. Ничего не угадывается автоматически;
 - **список сохранённых матчей** (каталог `data/`): загрузить, удалить;
 - **загрузка файла** CSV/JSON прямо в браузер;
 - **ссылка на реплей**: вставили `share.polytopia.io/g/...` — получили
@@ -101,6 +105,18 @@ polytopia-analyzer web --port 9000 --no-browser
 Сервер слушает только 127.0.0.1 (данные не покидают машину), реализован на
 стандартном `http.server` без внешних зависимостей. Остановка — Ctrl+C
 в терминале (или `pkill -f "polytopia-analyzer web"`).
+
+Для OCR финального табло нужны дополнительные зависимости (опциональны — всё
+остальное работает без них): системный [tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html)
+(Linux: `pacman -S tesseract` / `apt install tesseract-ocr`, Windows:
+установщик UB-Mannheim) и Python-пакеты:
+
+```bash
+.venv/bin/pip install -e ".[ocr]"
+```
+
+Если tesseract не найден, кнопка OCR покажет понятную ошибку с инструкцией,
+а не упадёт.
 
 ## Формат данных
 
@@ -171,7 +187,7 @@ turn,player,score,income,army,cities,kills,losses,captured,lost_cities,damage
 ## Разработка
 
 ```bash
-.venv/bin/pytest -q        # 95 тестов
+.venv/bin/pytest -q        # 105 тестов
 ```
 
 Принцип работы, внутреннее устройство, формат данных и точки расширения
@@ -188,6 +204,7 @@ polytopia_analyzer/
 ├── validation.py # правила проверки данных (ошибки/предупреждения/инфо)
 ├── report.py     # HTML-отчёт с plotly.js
 ├── webapp.py     # локальный веб-сервер (HTTP API)
+├── importers/    # ocr.py — распознавание чисел с табло (tesseract)
 ├── cli.py        # analyze / template / open / convert / web
 └── assets/       # plotly-basic.min.js, webui.html
 ```
@@ -196,5 +213,5 @@ polytopia_analyzer/
 
 - [ ] Адаптер экспорта PolyMod (JSON состояния из Steam-клиента)
 - [ ] Парсер `.state`-сейвов одиночной игры (LZ4 + бинарный формат)
-- [ ] OCR-распознавание экрана счёта из игры/скриншотов
+- [x] OCR-распознавание экрана счёта из игры/скриншотов (v0.2, M4)
 - [ ] Сравнение нескольких матчей одного игрока (тренды)

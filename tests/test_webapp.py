@@ -235,3 +235,72 @@ def test_index_has_wizard_mode(base):
     assert 'id="view-toggle"' in body
     assert 'id="wizard"' in body
     assert "Ctrl+Enter" in body
+
+
+# ---------- M4: OCR финального табло ----------
+
+
+def _ocr_png():
+    import base64
+    import io
+
+    from PIL import Image, ImageDraw, ImageFont
+
+    img = Image.new("RGB", (640, 220), "white")
+    d = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/TTF/DejaVuSans-Bold.ttf", 72)
+    except OSError:
+        font = ImageFont.load_default(size=72)
+    d.text((40, 15), "3480", fill="black", font=font)
+    d.text((40, 125), "3068", fill="black", font=font)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def test_ocr_endpoint(base):
+    import shutil
+
+    pytest.importorskip("pytesseract")
+    if shutil.which("tesseract") is None:
+        pytest.skip("tesseract не установлен")
+    url, _ = base
+    status, body = req(url + "/api/ocr", "POST", {"image_b64": _ocr_png()})
+    assert status == 200
+    data = jload(body)
+    assert data["ok"] is True
+    assert 3480 in [n["value"] for n in data["numbers"]]
+    assert data["width"] == 640 and data["height"] == 220
+
+
+def test_ocr_bad_base64(base):
+    url, _ = base
+    status, body = req(url + "/api/ocr", "POST", {"image_b64": "!!!не base64!!!"})
+    assert status == 400
+    assert jload(body)["ok"] is False
+
+
+def test_ocr_unavailable_returns_503(base, monkeypatch):
+    import base64
+
+    from polytopia_analyzer.importers import ocr as ocr_mod
+
+    def boom(*a, **k):
+        raise ocr_mod.OcrUnavailableError("tesseract не найден — установите пакет")
+
+    monkeypatch.setattr(ocr_mod, "recognize_numbers", boom)
+    url, _ = base
+    status, body = req(url + "/api/ocr", "POST",
+                       {"image_b64": base64.b64encode(b"x").decode()})
+    assert status == 503
+    assert "tesseract" in jload(body)["error"]
+
+
+def test_index_has_ocr_ui(base):
+    """M4: в интерфейсе есть загрузка скриншота табло и привязка чисел."""
+    url, _ = base
+    status, body = req(url + "/")
+    assert status == 200
+    assert 'id="ocr-file"' in body
+    assert 'id="ocr-dialog"' in body

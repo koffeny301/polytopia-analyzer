@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import sys
 import threading
@@ -16,6 +17,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import __version__
+from .importers import ocr as ocr_mod
 from .links import extract_game_id, mobile_link, share_link, steam_link
 from .report import build_report
 from .validation import validate_match
@@ -195,6 +197,22 @@ class RequestHandler(BaseHTTPRequestHandler):
             match = match_from_dict(payload.get("match") or {})
             rep = validate_match(match)
             return self._json({"ok": True, **rep.to_dict()})
+        if path == "/api/ocr":
+            payload = self._json_body()
+            raw = str(payload.get("image_b64", ""))
+            if raw.startswith("data:"):  # data URL из FileReader
+                raw = raw.split(",", 1)[-1]
+            try:
+                image_bytes = base64.b64decode(raw, validate=True)
+            except (ValueError, TypeError) as e:
+                raise ValueError(f"Некорректный base64 изображения: {e}") from e
+            if not image_bytes:
+                raise ValueError("Пустое изображение")
+            try:
+                result = ocr_mod.recognize_numbers(image_bytes)
+            except ocr_mod.OcrUnavailableError as e:
+                return self._fail(503, str(e))
+            return self._json({"ok": True, **result.to_dict()})
         if path == "/api/upload":
             text = self._read_body().decode("utf-8", errors="replace")
             fmt = (qs.get("format") or ["auto"])[0].lower()
