@@ -170,3 +170,77 @@ def test_manual_instructions_contain_line(shim):
     assert "Параметры запуска" in text
     assert "%command%" in text
     assert "Откат" in text
+
+
+# ---------- предпроверка окружения (0.5.0) ----------
+
+def _make_steam_tree(tmp_path: Path) -> Path:
+    """Правдоподобное дерево Steam: корень, библиотека, конфиг профиля."""
+    root = tmp_path / "steam"
+    (root / "userdata" / "1" / "config").mkdir(parents=True)
+    (root / "userdata" / "1" / "config" / "localconfig.vdf").write_text(VDF, encoding="utf-8")
+    (root / "steamapps").mkdir(parents=True)
+    return root
+
+
+def test_steam_library_roots_parses_vdf(tmp_path, monkeypatch):
+    root = _make_steam_tree(tmp_path)
+    extra = tmp_path / "library2"
+    extra.mkdir()
+    (root / "steamapps" / "libraryfolders.vdf").write_text(
+        '"libraryfolders"\n{\n\t"0"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n'
+        % str(root).replace("\\", "\\\\") +
+        '\t"1"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n}\n' % str(extra).replace("\\", "\\\\"),
+        encoding="utf-8")
+    monkeypatch.setattr(steam, "steam_roots", lambda: [root])
+    roots = steam.steam_library_roots()
+    assert root in roots and extra in roots
+
+
+def test_game_dirs_env_first(tmp_path, monkeypatch):
+    override = tmp_path / "custom-game"
+    monkeypatch.setenv("POLYTOPIA_DIR", str(override))
+    monkeypatch.setattr(steam, "steam_roots", lambda: [])
+    dirs = steam.game_dirs()
+    assert dirs[0] == override
+
+
+def test_detect_reports_environment(tmp_path, monkeypatch, cfg, shim):
+    root = _make_steam_tree(tmp_path)
+    game = root / "steamapps" / "common" / steam.GAME_DIR_NAME
+    game.mkdir(parents=True)
+    (game / steam.NATIVE_MARKER).write_bytes(b"elf")
+    monkeypatch.delenv("POLYTOPIA_DIR", raising=False)
+    monkeypatch.setattr(steam, "steam_roots", lambda: [root])
+    monkeypatch.setattr(steam, "config_paths",
+                        lambda: [root / "userdata" / "1" / "config" / "localconfig.vdf"])
+    monkeypatch.setattr(steam, "shim_install_path", lambda: shim)
+    d = steam.detect()
+    assert d["steam_found"] and d["config_found"]
+    assert d["game_found"] and d["game_native"] and d["game_dir"] == str(game)
+    assert d["shim_present"] and d["shim_path"] == str(shim)
+    assert d["installed"] is False
+    assert "%command%" in d["expected"] and "%command%" in d["manual"]
+
+
+def test_detect_proton_build_not_native(tmp_path, monkeypatch, shim):
+    root = _make_steam_tree(tmp_path)
+    game = root / "steamapps" / "common" / steam.GAME_DIR_NAME
+    game.mkdir(parents=True)
+    (game / "Polytopia.exe").write_bytes(b"mz")  # Windows-сборка через Proton
+    monkeypatch.delenv("POLYTOPIA_DIR", raising=False)
+    monkeypatch.setattr(steam, "steam_roots", lambda: [root])
+    monkeypatch.setattr(steam, "config_paths", lambda: [])
+    monkeypatch.setattr(steam, "shim_install_path", lambda: shim)
+    d = steam.detect()
+    assert d["game_found"] is True and d["game_native"] is False
+    assert d["config_found"] is False
+
+
+def test_detect_no_steam_no_game(tmp_path, monkeypatch):
+    monkeypatch.delenv("POLYTOPIA_DIR", raising=False)
+    monkeypatch.setattr(steam, "steam_roots", lambda: [])
+    monkeypatch.setattr(steam, "shim_install_path", lambda: tmp_path / "нет.so")
+    d = steam.detect()
+    assert d["steam_found"] is False and d["game_found"] is False
+    assert d["shim_present"] is False and d["installed"] is False

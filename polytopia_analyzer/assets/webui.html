@@ -89,6 +89,37 @@ table#grid td input { width:78px; padding:4px 6px; font-size:12.5px; border-radi
 
 /* переключатель вида и мастер ввода (M2) */
 .hidden { display:none; }
+
+/* режимы «с шимом / без шима» и первый запуск (0.5.0) */
+body.mode-plain .mode-shim { display:none; }
+#btn-mode { color:var(--muted); }
+#onboard { position:fixed; inset:0; z-index:100; background:rgba(10,12,26,.88);
+           backdrop-filter:blur(8px); padding:24px; }
+#onboard:not(.hidden) { display:flex; align-items:center; justify-content:center; }
+.onb-wrap { max-width:880px; width:100%; }
+.onb-title { font-family:Georgia,serif; color:var(--gold); font-size:26px;
+             text-align:center; margin-bottom:6px; }
+.onb-sub { color:var(--muted); text-align:center; font-size:14px; margin-bottom:22px; }
+.onb-cards { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.onb-card { background:var(--panel); border:1px solid var(--border); border-radius:14px;
+            padding:20px; display:flex; flex-direction:column; gap:10px; }
+.onb-card h3 { margin:0; font-family:Georgia,serif; color:var(--gold); font-size:17px; }
+.onb-card ul { margin:0; padding-left:18px; color:var(--muted); font-size:13px; line-height:1.65; }
+.onb-card button { margin-top:auto; padding:11px; font-size:14px; }
+.onb-note { color:var(--muted); font-size:12px; text-align:center; margin-top:16px; }
+@media (max-width: 720px) { .onb-cards { grid-template-columns:1fr; } }
+
+/* предпроверки установщика шима */
+#steam-manual { white-space: pre-wrap; }
+.preflight { list-style:none; margin:8px 0 0; padding:0; font-size:12.5px; }
+.preflight li { display:flex; gap:8px; padding:3px 0; color:var(--muted); }
+.preflight li .pf-ic { width:16px; text-align:center; flex-shrink:0; }
+.preflight li.pf-ok .pf-ic { color:var(--green); }
+.preflight li.pf-bad .pf-ic { color:var(--red); }
+.preflight li.pf-bad { color:var(--text); }
+details.card summary { cursor:pointer; font-family:Georgia,serif; color:var(--gold);
+                       font-size:15px; font-weight:600; }
+
 .view-toggle { display:flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
 .view-toggle button { border:none; border-radius:0; padding:6px 14px; background:transparent; color:var(--muted); }
 .view-toggle button.active { background:var(--panel2); color:var(--gold); font-weight:600; }
@@ -164,6 +195,7 @@ footer { text-align:center; color:var(--muted); font-size:11px; padding:14px; }
   <div id="current-name">новый матч</div>
   <div class="spacer"></div>
   <span id="version"></span>
+  <button id="btn-mode" title="Режим работы: с шимом или без">⚙ Режим</button>
   <button id="btn-new">Новый матч</button>
   <button id="btn-save">Сохранить</button>
   <button id="btn-save-as" title="Сохранить под другим именем">Сохранить как…</button>
@@ -181,29 +213,18 @@ footer { text-align:center; color:var(--muted); font-size:11px; padding:14px; }
     </label>
   </section>
 
-  <section class="card">
-    <h3>Скриншот табло (OCR)</h3>
-    <label class="hint" style="display:block;cursor:pointer">
-      🖼️ Загрузить скриншот финального табло
-      <input type="file" id="ocr-file" accept="image/*" style="display:none">
-    </label>
-    <div class="hint" style="margin-top:8px">
-      OCR найдёт числа, а вы привяжете их к игрокам и метрикам.
-      Нужен системный tesseract и pip install polytopia-match-analyzer[ocr].
-    </div>
-  </section>
-
-  <section class="card">
-    <h3>Чтение из игры (Steam)</h3>
+  <section class="card mode-shim" id="card-shim">
+    <h3>Шим: чтение из игры (Steam)</h3>
     <div id="steam-status" class="hint">Проверяю параметры запуска…</div>
-    <div style="display:flex;gap:8px;margin-top:8px">
+    <ul id="steam-preflight" class="preflight"></ul>
+    <div style="display:flex;gap:8px;margin-top:10px">
       <button id="btn-steam-enable" style="flex:1">Включить</button>
       <button id="btn-steam-disable" style="flex:1">Выключить</button>
     </div>
     <div id="steam-manual" class="hint" style="margin-top:8px"></div>
   </section>
 
-  <section class="card">
+  <section class="card mode-shim">
     <h3>Импорт из игры (шим)</h3>
     <div id="inbox-status" class="hint">Проверяю папку…</div>
     <div style="margin-top:8px">
@@ -251,6 +272,21 @@ footer { text-align:center; color:var(--muted); font-size:11px; padding:14px; }
       CSV удобно править в Calc/Excel и хранить в Obsidian. Пустые ячейки = данные неизвестны (не ноль!).
     </div>
   </section>
+
+  <details class="card">
+    <summary>🧪 Экспериментальные функции</summary>
+    <div style="margin-top:12px">
+      <label class="hint" style="display:block;cursor:pointer">
+        🖼️ Распознать скриншот табло (OCR)
+        <input type="file" id="ocr-file" accept="image/*" style="display:none">
+      </label>
+      <div class="hint" style="margin-top:8px">
+        OCR найдёт числа, а вы привяжете их к игрокам и метрикам.
+        Нужен системный tesseract и pip install polytopia-match-analyzer[ocr].
+        Качество распознавания не гарантируется — проверяйте результат.
+      </div>
+    </div>
+  </details>
 
   <section class="card">
     <h3>Как пользоваться</h3>
@@ -338,6 +374,34 @@ footer { text-align:center; color:var(--muted); font-size:11px; padding:14px; }
       <button id="ocr-cancel">Отмена</button>
       <button id="ocr-apply" class="gold" disabled>Применить</button>
     </div>
+  </div>
+</div>
+
+<div id="onboard" class="hidden">
+  <div class="onb-wrap">
+    <div class="onb-title">Как вы хотите анализировать матчи?</div>
+    <div class="onb-sub">Выбор сохраняется, изменить можно кнопкой «⚙ Режим» в шапке</div>
+    <div class="onb-cards">
+      <div class="onb-card">
+        <h3>📋 Без шима</h3>
+        <ul>
+          <li>Ничего не устанавливается, игра не изменяется</li>
+          <li>Одиночная партия: импорт сейва .state — точные данные одной кнопкой</li>
+          <li>Мультиплеер: таблица заполняется вручную при просмотре реплея, либо загрузите готовый CSV/JSON</li>
+        </ul>
+        <button id="onb-plain">Продолжить без шима</button>
+      </div>
+      <div class="onb-card">
+        <h3>⚙️ С шимом (автоматически)</h3>
+        <ul>
+          <li>В параметры запуска Steam добавляется строка с небольшой библиотекой — файлы игры не меняются</li>
+          <li>Во время просмотра реплея автоматически пишутся счёт, звёзды, города, убийства и потери</li>
+          <li>Нужны Linux, Steam и нативная сборка игры; снимки делаются только в реплеях</li>
+        </ul>
+        <button id="onb-shim" class="gold">Установить шим</button>
+      </div>
+    </div>
+    <div class="onb-note">Шим только читает состояние и работает исключительно при просмотре реплеев — в живом матче запись невозможна.</div>
   </div>
 </div>
 
@@ -971,23 +1035,44 @@ function applyOcr() {
 /* ---------- чтение из игры: строка запуска Steam (6.4) ---------- */
 
 async function refreshSteamShim() {
-  const box = $("steam-status"), manual = $("steam-manual");
+  const box = $("steam-status"), manual = $("steam-manual"), pf = $("steam-preflight");
   const en = $("btn-steam-enable"), dis = $("btn-steam-disable");
   try {
     const res = await api("/api/steam-shim");
+    const proton = res.game_found && !res.game_native;
+    const checks = [
+      ["Steam найден", res.steam_found,
+       "Установите Steam (Linux) — без него строка запуска недоступна."],
+      ["Конфиг Steam (localconfig.vdf)", res.config_found,
+       "Запустите Steam хотя бы один раз, чтобы он создал профиль."],
+      [proton ? "Игра: найдена, но это не нативная сборка" : "Игра установлена (нативная Linux-сборка)",
+       res.game_found && res.game_native,
+       proton
+         ? "Шим работает только с нативной Linux-сборкой: Steam → игра → Свойства → Совместимость → отключите Proton."
+         : "Установите The Battle of Polytopia через Steam."],
+      ["Библиотека шима собрана", res.shim_present,
+       "Пересоберите приложение или выполните make -C shim (см. docs/shim-dump.md)."],
+    ];
+    pf.innerHTML = checks.map(([label, ok, bad]) =>
+      `<li class="${ok ? "pf-ok" : "pf-bad"}" title="${esc(ok ? "" : bad)}">` +
+      `<span class="pf-ic">${ok ? "✔" : "✖"}</span>${esc(label)}</li>`).join("");
+    const ready = checks.every(c => c[1]);
     if (res.installed) {
       box.textContent = "Включено: игра запускается с шимом." +
         (res.steam_running ? " Steam запущен — перезапустите его, чтобы строка применилась." : "");
       en.disabled = true; dis.disabled = false;
+    } else if (!ready) {
+      const failed = checks.find(c => !c[1]);
+      box.textContent = "Установка недоступна: " + failed[2];
+      en.disabled = true; dis.disabled = true;
     } else {
-      box.textContent = res.shim_present
-        ? "Выключено. Включите — и игра будет читать состояние при запуске из Steam."
-        : "Шим не собран: make -C shim (см. docs/shim-dump.md).";
-      en.disabled = !res.shim_present; dis.disabled = true;
+      box.textContent = "Выключено. Включите — и игра будет читать состояние при запуске реплеев.";
+      en.disabled = false; dis.disabled = true;
     }
     manual.textContent = res.manual || "";
   } catch (e) {
     box.textContent = e.message;
+    pf.innerHTML = "";
     en.disabled = true; dis.disabled = true;
   }
 }
@@ -1106,7 +1191,9 @@ function wireEvents() {
   $("btn-steam-disable").onclick = () => steamShimAction("disable");
   refreshInbox();
   refreshState();
-  refreshSteamShim();
+  $("btn-mode").onclick = showOnboard;
+  $("onb-plain").onclick = () => { hideOnboard(); applyMode("plain"); };
+  $("onb-shim").onclick = () => { hideOnboard(); applyMode("shim", { scroll: true }); };
   $("link-input").addEventListener("keydown", e => { if (e.key === "Enter") parseLink(); });
   $("btn-csv").onclick = () => exportMatch("csv");
   $("btn-json").onclick = () => exportMatch("json");
@@ -1330,6 +1417,25 @@ function wireEvents() {
   });
 }
 
+/* ---------- режим работы: с шимом / без (0.5.0) ---------- */
+
+const MODE_KEY = "polytopiaMode";
+
+function applyMode(mode, opts = {}) {
+  document.body.classList.toggle("mode-plain", mode === "plain");
+  document.body.classList.toggle("mode-shim", mode === "shim");
+  try { localStorage.setItem(MODE_KEY, mode); } catch (e) { /* приватный режим */ }
+  $("btn-mode").textContent = mode === "shim" ? "⚙ Режим: шим" : "⚙ Режим: без шима";
+  refreshSteamShim();
+  if (mode === "shim" && opts.scroll) {
+    const c = $("card-shim");
+    if (c) c.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+}
+
+function showOnboard() { $("onboard").classList.remove("hidden"); }
+function hideOnboard() { $("onboard").classList.add("hidden"); }
+
 /* ---------- старт ---------- */
 
 function init() {
@@ -1342,6 +1448,10 @@ function init() {
   state.dirty = false;
   renderAll();
   loadMatches();
+  let saved = null;
+  try { saved = localStorage.getItem(MODE_KEY); } catch (e) { /* приватный режим */ }
+  if (saved === "plain" || saved === "shim") applyMode(saved);
+  else { applyMode("plain"); showOnboard(); }
   fetch("/api/health").then(r => r.json())
     .then(d => { $("version").textContent = "v" + d.version; })
     .catch(() => {});

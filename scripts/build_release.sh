@@ -14,7 +14,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-PY=.venv/bin/python
+PY="${PYTHON_BIN:-.venv/bin/python}"
 VERSION=$("$PY" -c "import polytopia_analyzer; print(polytopia_analyzer.__version__)")
 NAME="polytopia-analyzer-$VERSION-linux-x86_64"
 BUILD_SHIM=1

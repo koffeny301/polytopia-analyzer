@@ -152,13 +152,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         if path == "/api/matches":
             return self._json({"ok": True, "matches": self._list_matches()})
         if path == "/api/steam-shim":
-            try:
-                st = steam_mod.status()
-                data = st.to_dict()
-                data["manual"] = steam_mod.manual_instructions()
-            except (steam_mod.SteamConfigError, steam_mod.SteamRunningError) as e:
-                return self._fail(503, str(e))
-            return self._json({"ok": True, **data})
+            return self._json({"ok": True, **steam_mod.detect()})
         if path == "/api/inbox":
             directory = Path((qs.get("dir") or [""])[0]).expanduser() if qs.get("dir") \
                 else shim_mod.default_inbox_dir()
@@ -389,9 +383,9 @@ def serve(host: str = "127.0.0.1", port: int = 8765,
     httpd = create_server(host, port, data_dir, verbose)
     actual_host, actual_port = httpd.server_address[:2]
     url = f"http://{actual_host}:{actual_port}/"
-    print(f"Веб-интерфейс Polytopia Analyzer: {url}")
-    print(f"Каталог матчей: {httpd.data_dir}")
-    print("Остановка: Ctrl+C")
+    print(f"Веб-интерфейс Polytopia Analyzer: {url}", flush=True)
+    print(f"Каталог матчей: {httpd.data_dir}", flush=True)  # type: ignore[attr-defined]
+    print("Остановка: Ctrl+C", flush=True)
     if open_browser:
         def _open() -> None:
             if not webbrowser.open(url):

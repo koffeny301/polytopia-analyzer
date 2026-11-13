@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -30,6 +31,8 @@ from typing import Optional
 APPID = "874390"
 STATE_FILE = Path.home() / ".local/share/polytopia-analyzer/steam-launch.json"
 SHIM_NAME = "libpolyread_dump.so"
+GAME_DIR_NAME = "The Battle of Polytopia"
+NATIVE_MARKER = "Polytopia.x86_64"
 
 
 class SteamRunningError(RuntimeError):
@@ -79,7 +82,43 @@ def game_dir_default() -> Path:
     env = os.environ.get("POLYTOPIA_DIR")
     if env:
         return Path(env)
-    return Path.home() / ".steam/steam/steamapps/common/The Battle of Polytopia"
+    return Path.home() / ".steam/steam/steamapps/common" / GAME_DIR_NAME
+
+
+def steam_library_roots() -> list[Path]:
+    """Все папки библиотек Steam (libraryfolders.vdf) + сами корни."""
+    roots: list[Path] = []
+    seen: set[str] = set()
+
+    def _add(p: Path) -> None:
+        s = str(p)
+        if s not in seen and p.is_dir():
+            seen.add(s)
+            roots.append(p)
+
+    for root in steam_roots():
+        _add(root)
+        vdf = root / "steamapps" / "libraryfolders.vdf"
+        if not vdf.is_file():
+            continue
+        try:
+            text = vdf.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for m in re.finditer(r'"path"\s*"([^"]+)"', text):
+            _add(Path(m.group(1).replace("\\\\", "\\")))
+    return roots
+
+
+def game_dirs() -> list[Path]:
+    """Кандидаты каталогов установки игры, по приоритету."""
+    out: list[Path] = []
+    env = os.environ.get("POLYTOPIA_DIR")
+    if env:
+        out.append(Path(env).expanduser())
+    for root in steam_library_roots():
+        out.append(root / "steamapps" / "common" / GAME_DIR_NAME)
+    return out
 
 
 def shim_install_path() -> Path:
@@ -375,3 +414,42 @@ def manual_instructions(shim: Optional[Path] = None, inbox: Optional[Path] = Non
         "Свойства → Общие → Параметры запуска, вставить строку:\n\n"
         f"    {line}\n\n"
         "Откат: убрать эту строку из параметров запуска.")
+
+
+def detect() -> dict:
+    """Предпроверка без исключений — для GUI-установщика шима.
+
+    Возвращает всё, что нужно интерфейсу: найден ли Steam, его конфиг,
+    установлена ли игра и является ли сборка нативной (Linux), на месте ли
+    шим, включена ли уже наша строка запуска.
+    """
+    gdirs = game_dirs()
+    gdir = next((d for d in gdirs if d.is_dir()), None)
+    shim = shim_install_path()
+    cfgs = config_paths()
+    cfg = cfgs[0] if cfgs else None
+    data: dict = {
+        "steam_found": bool(steam_roots()),
+        "config_found": cfg is not None,
+        "config": str(cfg) if cfg else None,
+        "appid": APPID,
+        "game_found": gdir is not None,
+        "game_dir": str(gdir) if gdir else None,
+        "game_native": bool(gdir and (gdir / NATIVE_MARKER).is_file()),
+        "shim_present": shim.is_file(),
+        "shim_path": str(shim),
+        "steam_running": is_steam_running(),
+        "installed": False,
+        "current": None,
+        "expected": launch_line(),
+    }
+    if cfg is not None:
+        try:
+            st = status(config=cfg)
+            data["installed"] = st.installed
+            data["current"] = st.current
+            data["expected"] = st.expected
+        except (SteamConfigError, SteamRunningError, OSError):
+            pass
+    data["manual"] = manual_instructions()
+    return data

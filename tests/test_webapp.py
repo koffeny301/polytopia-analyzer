@@ -154,6 +154,9 @@ def test_steam_shim_status_and_toggle(base, tmp_path, monkeypatch):
     monkeypatch.setattr(steam, "start_steam", lambda: None)
     monkeypatch.setattr(steam, "shim_install_path", lambda: shim)
     monkeypatch.setattr(steam, "default_config_path", lambda: cfg)
+    monkeypatch.setattr(steam, "config_paths", lambda: [cfg])
+    monkeypatch.setattr(steam, "steam_roots", lambda: [])
+    monkeypatch.setattr(steam, "game_dirs", lambda: [])
 
     url, _ = base
     status, body = req(url + "/api/steam-shim")
@@ -161,6 +164,8 @@ def test_steam_shim_status_and_toggle(base, tmp_path, monkeypatch):
     data = jload(body)
     assert data["ok"] and not data["installed"] and data["shim_present"]
     assert "%command%" in data["manual"]
+    assert data["steam_found"] is False and data["config_found"] is True
+    assert data["game_found"] is False and data["game_native"] is False
 
     status, body = req(url + "/api/steam-shim", method="POST",
                        data={"action": "enable", "force": True})

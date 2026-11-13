@@ -1,0 +1,6 @@
+node_modules/
+src-tauri/target/
+src-tauri/gen/
+# sidecar собирается отдельно (PyInstaller) и копируется перед сборкой:
+src-tauri/binaries/*
+!src-tauri/binaries/.gitkeep
