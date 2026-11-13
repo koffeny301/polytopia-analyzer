@@ -68,8 +68,23 @@ polytopia-analyzer install-shim disable --restart-steam   # откат
 Подробности: `docs/shim-probe.md` (что видно через API движка) и
 `docs/shim-dump.md` (путь к состоянию, снимки, грабли).
 
+### Сейвы одиночной игры (`.state`) — без шима и Steam
+
+Одиночную партию можно импортировать прямо из сейва игры: точные счёт, города,
+армия, звёзды, убийства и потери на момент сохранения (формат v124 разобран
+заново — community-инструменты его уже не читают):
+
+```bash
+polytopia-analyzer import-state          # свежайший сейв из папки игры
+polytopia-analyzer import-state <файл.state> -o data/sp.json
+```
+
+Только одиночные партии: в живом мультиплеере это было бы читерством, а
+сейвы MP в текущей версии игры — заглушки. Формат и ограничения:
+`docs/state-format.md`.
+
 Архитектура допускает подключение и других источников (экспорт состояния через
-PolyMod на Steam/Proton, разбор `.state`-сейвов, OCR-скриншоты) — формат матча
+PolyMod на Steam/Proton, OCR-скриншоты) — формат матча
 от источника не зависит.
 
 ## Установка для игрока (без терминала)
@@ -137,6 +152,10 @@ polytopia-analyzer install-shim disable --restart-steam
 # 6. Импорт снимков состояния игры (шим) — разово или следя за папкой
 polytopia-analyzer import-inbox -o data/shim.json --title "Timeless Battles"
 polytopia-analyzer import-inbox --watch        # обновляет матч по ходу реплея
+
+# 7. Импорт сейва одиночной игры (.state) — путь или автопоиск свежайшего
+polytopia-analyzer import-state                # найдёт сейв сам
+polytopia-analyzer import-state ~/game.state -o data/sp.json --title "Моя партия"
 ```
 
 Демо: `examples/demo_match.csv` (сгенерирован `examples/make_demo.py`).
@@ -300,10 +319,11 @@ polytopia_analyzer/
 ├── validation.py # правила проверки данных (ошибки/предупреждения/инфо)
 ├── report.py     # HTML-отчёт с plotly.js
 ├── webapp.py     # локальный веб-сервер (HTTP API)
-├── importers/    # ocr.py — числа с табло; shim.py — снимки состояния игры
+├── importers/    # ocr.py — числа с табло; shim.py — снимки состояния игры;
+│                 # state.py — сейвы одиночной игры (.state, LZ4)
 ├── paths.py      # где данные: репозиторий или ~/.local/share (onefile)
 ├── steam.py      # параметры запуска Steam: включить/выключить шим, откат
-├── cli.py        # analyze / template / open / convert / install-shim / import-inbox / web
+├── cli.py        # analyze / template / open / convert / install-shim / import-inbox / import-state / web
 └── assets/       # plotly-basic.min.js, webui.html
 ```
 
@@ -313,6 +333,7 @@ polytopia_analyzer/
 - [x] Установщик строки запуска Steam вместо временной обёртки (v0.2, M6.4)
 - [x] Сборка и распространение: onefile, установщик, ярлык, инструкция (v0.2, M8)
 - [ ] Адаптер экспорта PolyMod (JSON состояния из Steam-клиента)
-- [ ] Парсер `.state`-сейвов одиночной игры (LZ4 + бинарный формат)
+- [x] Парсер `.state`-сейвов одиночной игры: чтение и импорт (v0.3, M7.1);
+      походовые захваты из истории действий — M7.2
 - [x] OCR-распознавание экрана счёта из игры/скриншотов (v0.2, M4)
 - [ ] Сравнение нескольких матчей одного игрока (тренды)

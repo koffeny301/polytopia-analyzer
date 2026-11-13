@@ -245,6 +245,7 @@ def _winner_banner(match: Match) -> str:
 
 _SOURCE_LABELS = {
     "shim": "состояние игры (шим)",
+    "state": "сейв игры (.state)",
     "ocr": "OCR скриншота",
     "polymod": "экспорт PolyMod",
 }

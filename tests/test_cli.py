@@ -147,6 +147,44 @@ def test_import_inbox_empty_dir_fails(tmp_path, capsys):
     assert "нет снимков" in capsys.readouterr().out
 
 
+# ---------- import-state (.state-сейвы, веха M7) ----------
+
+def _state_fixture():
+    from pathlib import Path
+    return Path(__file__).parent / "fixtures" / "singleplayer-v124.state"
+
+
+def test_import_state_creates_match(tmp_path, capsys):
+    out = tmp_path / "state.json"
+    rc = main(["import-state", str(_state_fixture()), "-o", str(out),
+               "--title", "Первая партия"])
+    assert rc == 0
+    match = load_match(out)
+    assert match.meta.source == "state"
+    assert match.meta.title == "Первая партия"
+    assert match.meta.turn_limit == 30
+    assert match.player_names() == ["KOF", "Shayoszu"]
+    assert match.records_for("KOF")[0].score == 505
+    printed = capsys.readouterr().out
+    assert "Сейв:" in printed
+    assert "ошибок 0" in printed
+
+
+def test_import_state_missing_file(tmp_path, capsys):
+    rc = main(["import-state", str(tmp_path / "nope.state"),
+               "-o", str(tmp_path / "x.json")])
+    assert rc == 1
+    assert "не найден" in capsys.readouterr().out.lower()
+
+
+def test_import_state_bad_file(tmp_path, capsys):
+    bad = tmp_path / "bad.state"
+    bad.write_bytes(b"this is definitely not a polytopia save file")
+    rc = main(["import-state", str(bad), "-o", str(tmp_path / "x.json")])
+    assert rc == 1
+    assert "Ошибка разбора сейва" in capsys.readouterr().out
+
+
 def test_analyze_default_output_path(sample_csv, capsys):
     rc = main(["analyze", str(sample_csv)])
     assert rc == 0

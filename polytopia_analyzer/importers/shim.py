@@ -29,9 +29,13 @@ from typing import Iterable, Optional
 
 from ..models import Match, MatchMeta, Player, TurnRecord
 
-# TribeType: проверено на реальном матче (KOF — Polaris, Goylem — Zebasi)
+# TribeType: 1/15/16 проверено шимом на реальном матче (KOF — Polaris,
+# Goylem — Zebasi); 4 — по конвертеру PolyVision (5517 реальных сейвов
+# Bardur, см. docs/state-format.md). Остальные ids добавлять только после
+# сверки с игрой; до этого работает запасной вариант Tribe<n>.
 TRIBE_NAMES = {
     1: "Nature",
+    4: "Bardur",
     15: "Zebasi",
     16: "Polaris",
 }

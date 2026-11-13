@@ -214,6 +214,49 @@ def _default_shim_out() -> Path:
     return paths.matches_dir() / f"shim-{stamp}.json"
 
 
+def _default_state_out() -> Path:
+    from . import paths
+
+    stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M")
+    return paths.matches_dir() / f"state-{stamp}.json"
+
+
+def cmd_import_state(args: argparse.Namespace) -> int:
+    from .importers import state
+
+    if args.input:
+        inp = Path(args.input).expanduser()
+    else:
+        found = state.find_latest_save()
+        if found is None:
+            print("Ошибка: не найден сейв одиночной игры.")
+            print("Подсказка: укажите путь к .state явно или задайте папку "
+                  "переменной POLYTOPIA_SAVES_DIR")
+            print("  Linux:   ~/.config/unity3d/Midjiwan/Polytopia/<uuid>/Data/Singleplayer/")
+            print("  Windows: %USERPROFILE%/AppData/LocalLow/Midjiwan/Polytopia/<uuid>/Data/Singleplayer/")
+            return 1
+        inp = found
+    if not inp.exists():
+        print(f"Ошибка: файл не найден: {inp}")
+        return 1
+    try:
+        match = state.match_from_state(
+            inp, title=args.title, date=args.date, mode=args.mode,
+            map_name=getattr(args, "map", ""),
+        )
+    except ValueError as e:
+        print(f"Ошибка разбора сейва: {e}")
+        return 1
+    out = Path(args.output).expanduser() if args.output else _default_state_out()
+    rep = validate_match(match)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    save_match(match, out)
+    print(f"Сейв: {inp.resolve()}")
+    _print_validation(match)
+    _print_summary(match, out.resolve())
+    return 1 if rep.errors else 0
+
+
 def _import_inbox_once(directory: Path, out: Path, args) -> tuple[int, Match]:
     from .importers import shim
 
@@ -433,6 +476,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--interval", type=float, default=3.0,
                    help="период опроса папки в режиме --watch, секунды")
     p.set_defaults(func=cmd_import_inbox)
+
+    p = sub.add_parser("import-state",
+                       help="импортировать сейв одиночной игры (.state)")
+    p.add_argument("input", nargs="?", default=None,
+                   help="путь к файлу .state (по умолчанию — свежайший сейв игры)")
+    p.add_argument("-o", "--output", default=None,
+                   help="файл матча (по умолчанию data/state-<дата>.json)")
+    p.add_argument("--title", default="", help="название матча")
+    p.add_argument("--mode", default="", help="режим (Might/Perfection/…)")
+    p.add_argument("--map", default="", help="название карты")
+    p.add_argument("--date", default="", help="дата матча (YYYY-MM-DD)")
+    p.set_defaults(func=cmd_import_state)
 
     p = sub.add_parser("web", help="запустить локальный веб-интерфейс (localhost)")
     p.add_argument("--port", type=int, default=8765, help="порт (по умолчанию 8765)")

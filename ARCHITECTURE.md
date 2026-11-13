@@ -346,8 +346,11 @@ CLI и все маршруты HTTP API (реальные запросы к жи
 - **PolyMod-экспорт** (Steam): мод сериализует состояние игры в JSON —
   конвертер `mod_replay_*.json → Match` даст полностью автоматический
   pipeline «ссылка → реплей → отчёт» (веха M3, ждёт образец экспорта);
-- **парсер `.state`-сейвов** одиночной игры (LZ4 + бинарный формат, см.
-  PolytopiaSaveEditor/PolytopiaWorld);
+- **парсер `.state`-сейвов** одиночной игры — реализован
+  (`importers/state.py`, веха M7.1): LZ4-конверт + бинарный формат v124
+  (community-описание v122 от Samuel Yuan, MIT; отличия v124 найдены
+  эмпирически), точные score/cities/army/kills/losses без запуска игры;
+  формат и оракулы целостности — [docs/state-format.md](docs/state-format.md);
 - **OCR** экрана счёта — реализован (`importers/ocr.py`, веха M4):
   числа находит tesseract, привязывает человек; строгий CSV-формат
   описан в [docs/csv-spec.md](docs/csv-spec.md).
