@@ -229,7 +229,7 @@ def cmd_import_inbox(args: argparse.Namespace) -> int:
 
     directory = Path(args.dir).expanduser() if args.dir else shim.default_inbox_dir()
     session = shim.scan_inbox(directory)
-    if session.is_empty:
+    if session.is_empty and not args.watch:
         print(f"Ошибка: в папке нет снимков состояния: {directory}")
         print("Подсказка: снимки пишет шим, см. docs/shim-dump.md")
         return 1
@@ -243,6 +243,8 @@ def cmd_import_inbox(args: argparse.Namespace) -> int:
 
     print(f"Слежу за папкой: {directory}")
     print(f"Матч пишется в: {out.resolve()}")
+    if session.is_empty:
+        print("Снимков пока нет — жду, пока игра начнёт писать состояние.")
     last_mtime = 0.0
     try:
         while True:

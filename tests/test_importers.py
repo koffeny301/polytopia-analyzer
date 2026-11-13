@@ -119,6 +119,26 @@ def test_broken_snapshot_raises(inbox):
         shim.load_snapshots(inbox)
 
 
+def test_full_pipeline_inbox_to_report(inbox, tmp_path):
+    """Приёмка 6.5: папка снимков → матч → проверка → отчёт."""
+    from polytopia_analyzer.report import build_report
+    from polytopia_analyzer.storage import load_match, save_match
+
+    match = shim.match_from_inbox(inbox, title="Timeless Battles",
+                                  mode="Might", map_name="Archipelago")
+    rep = validate_match(match)
+    assert not rep.has_errors and not rep.warnings
+
+    out = tmp_path / "accept.json"
+    save_match(match, out)
+    back = load_match(out)
+    html = build_report(back, plotly_js=None)
+    assert "Timeless Battles" in html
+    assert "4485" in html and "2185" in html
+    assert "состояние игры (шим)" in html
+    assert back.meta.source == "shim"
+
+
 def test_tribe_name_fallback():
     assert shim.tribe_name(16) == "Polaris"
     assert shim.tribe_name(99) == "Tribe99"
