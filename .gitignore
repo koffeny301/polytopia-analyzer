@@ -12,3 +12,5 @@ polytopia_analyzer/assets/bin/
 dist/
 build/
 *.spec
+# заглушка-фронтенд Tauri (frontendDist) должна попасть в репозиторий:
+!desktop/dist/
