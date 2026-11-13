@@ -222,6 +222,78 @@ def test_inbox_import_empty_dir_404(base, tmp_path):
     assert status == 404
 
 
+# ---------- .state-сейвы (M7) ----------
+
+def _state_dir(tmp_path):
+    """Папка с одним сейвом, скопированным из фикстур."""
+    d = tmp_path / "saves"
+    d.mkdir()
+    src = Path(__file__).parent / "fixtures" / "singleplayer-v124.state"
+    (d / "test.state").write_bytes(src.read_bytes())
+    return d
+
+
+def test_state_status(base, tmp_path):
+    url, _ = base
+    d = _state_dir(tmp_path)
+    status, body = req(url + "/api/state?dir=" + urllib.parse.quote(str(d)))
+    assert status == 200
+    data = jload(body)
+    assert data["ok"] and data["path"].endswith("test.state")
+    assert data["size"] > 0 and data["mtime"] > 0
+
+
+def test_state_status_empty_dir(base, tmp_path):
+    url, _ = base
+    d = tmp_path / "no-saves"
+    d.mkdir()
+    status, body = req(url + "/api/state?dir=" + urllib.parse.quote(str(d)))
+    assert status == 200
+    assert jload(body)["path"] is None
+
+
+def test_state_import_creates_match(base, tmp_path):
+    url, data_dir = base
+    d = _state_dir(tmp_path)
+    status, body = req(url + "/api/state/import", method="POST",
+                       data={"dir": str(d), "title": "Из сейва", "out": "state-test"})
+    assert status == 200
+    data = jload(body)
+    assert data["ok"] and data["name"] == "state-test.json"
+    assert (data_dir / "state-test.json").exists()
+    assert data["match"]["meta"]["source"] == "state"
+    assert [p["name"] for p in data["match"]["players"]] == ["KOF", "Shayoszu"]
+    assert data["validation"]["errors"] == []
+
+
+def test_state_import_by_explicit_path(base, tmp_path):
+    url, data_dir = base
+    src = Path(__file__).parent / "fixtures" / "singleplayer-v124.state"
+    status, body = req(url + "/api/state/import", method="POST",
+                       data={"path": str(src), "out": "state-explicit"})
+    assert status == 200
+    data = jload(body)
+    assert data["ok"] and data["name"] == "state-explicit.json"
+    assert (data_dir / "state-explicit.json").exists()
+
+
+def test_state_import_empty_dir_404(base, tmp_path):
+    url, _ = base
+    d = tmp_path / "no-saves2"
+    d.mkdir()
+    status, _ = req(url + "/api/state/import", method="POST", data={"dir": str(d)})
+    assert status == 404
+
+
+def test_state_import_broken_file_400(base, tmp_path):
+    url, _ = base
+    bad = tmp_path / "bad.state"
+    bad.write_bytes(b"not a save at all, not even close to being one")
+    status, body = req(url + "/api/state/import", method="POST", data={"path": str(bad)})
+    assert status == 400
+    assert not jload(body)["ok"]
+
+
 def test_analyze_returns_report(base):
     url, _ = base
     s, b = req(url + "/api/analyze", "POST", {"match": MATCH})

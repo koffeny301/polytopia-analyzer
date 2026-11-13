@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from . import __version__
 from .importers import ocr as ocr_mod
 from .importers import shim as shim_mod
+from .importers import state as state_mod
 from . import paths
 from . import steam as steam_mod
 from .links import extract_game_id, mobile_link, share_link, steam_link
@@ -169,6 +170,16 @@ class RequestHandler(BaseHTTPRequestHandler):
                 "turns": session.turns,
                 "mtime": session.newest_mtime,
             })
+        if path == "/api/state":
+            dirs = None
+            if qs.get("dir"):
+                dirs = [Path(qs["dir"][0]).expanduser()]
+            latest = state_mod.find_latest_save(dirs)
+            if latest is None:
+                return self._json({"ok": True, "path": None})
+            st = latest.stat()
+            return self._json({"ok": True, "path": str(latest),
+                               "mtime": st.st_mtime, "size": st.st_size})
         if path.startswith("/api/matches/"):
             return self._get_match(path[len("/api/matches/"):], qs)
         self._fail(404, f"Неизвестный маршрут: {path}")
@@ -296,6 +307,35 @@ class RequestHandler(BaseHTTPRequestHandler):
             p = safe_match_path(self.data_dir, name)
             save_match(match, p)
             return self._json({"ok": True, "name": p.name,
+                               "match": match_to_dict(match),
+                               "validation": rep.to_dict()})
+        if path == "/api/state/import":
+            payload = self._json_body()
+            src = str(payload.get("path") or "").strip()
+            if src:
+                save_path = Path(src).expanduser()
+            else:
+                dirs = [Path(payload["dir"]).expanduser()] if payload.get("dir") else None
+                found = state_mod.find_latest_save(dirs)
+                if found is None:
+                    return self._fail(404, "Сейв одиночной игры не найден. "
+                                           "Запустите партию или укажите путь к .state")
+                save_path = found
+            if not save_path.exists():
+                return self._fail(404, f"Файл не найден: {save_path}")
+            match = state_mod.match_from_state(
+                save_path,
+                title=str(payload.get("title") or ""),
+                date=str(payload.get("date") or ""),
+                mode=str(payload.get("mode") or ""),
+                map_name=str(payload.get("map") or ""),
+            )
+            rep = validate_match(match)
+            name = str(payload.get("out") or "") or \
+                f"state-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+            p = safe_match_path(self.data_dir, name)
+            save_match(match, p)
+            return self._json({"ok": True, "name": p.name, "save": str(save_path),
                                "match": match_to_dict(match),
                                "validation": rep.to_dict()})
         if path.startswith("/api/matches/"):

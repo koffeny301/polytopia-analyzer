@@ -185,6 +185,19 @@ def test_import_state_bad_file(tmp_path, capsys):
     assert "Ошибка разбора сейва" in capsys.readouterr().out
 
 
+def test_import_state_midgame(tmp_path, capsys):
+    from pathlib import Path
+    mid = Path(__file__).parent / "fixtures" / "singleplayer-v124-midgame.state"
+    out = tmp_path / "mid.json"
+    rc = main(["import-state", str(mid), "-o", str(out)])
+    assert rc == 0
+    match = load_match(out)
+    assert len(match.player_names()) == 16
+    assert match.max_turn() == 1
+    assert match.player("KOF").tribe == "Luxidoor"
+    assert [r.turn for r in match.records_for("KOF")] == [0, 1]
+
+
 def test_analyze_default_output_path(sample_csv, capsys):
     rc = main(["analyze", str(sample_csv)])
     assert rc == 0

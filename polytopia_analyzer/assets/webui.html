@@ -216,6 +216,18 @@ footer { text-align:center; color:var(--muted); font-size:11px; padding:14px; }
   </section>
 
   <section class="card">
+    <h3>Импорт из сейва (.state)</h3>
+    <div id="state-status" class="hint">Проверяю сейв…</div>
+    <div style="margin-top:8px">
+      <button id="btn-state-import">⬇ Импортировать сейв</button>
+    </div>
+    <div class="hint" style="margin-top:8px">
+      Одиночная партия без шима: точные счёт, города, армия, убийства и потери.
+      Режим записи по ходу игры — в CLI: <code>import-state --watch</code>.
+    </div>
+  </section>
+
+  <section class="card">
     <h3>Ссылка на реплей</h3>
     <input type="text" id="link-input" placeholder="https://share.polytopia.io/g/…">
     <div style="margin-top:8px"><button id="btn-link">Разобрать ссылку</button></div>
@@ -1038,6 +1050,49 @@ async function importInbox() {
   }
 }
 
+/* ---------- импорт из сейва (.state, M7) ---------- */
+
+async function refreshState() {
+  const box = $("state-status"), btn = $("btn-state-import");
+  try {
+    const res = await api("/api/state");
+    if (!res.path) {
+      box.textContent = "Сейв не найден. Начните одиночную партию.";
+      btn.disabled = true;
+      return;
+    }
+    const when = new Date(res.mtime * 1000);
+    const hh = String(when.getHours()).padStart(2, "0");
+    const mm = String(when.getMinutes()).padStart(2, "0");
+    const name = res.path.split("/").pop();
+    box.textContent = `Сейв: ${name} (${(res.size / 1024).toFixed(1)} КБ, изменён ${hh}:${mm})`;
+    btn.disabled = false;
+  } catch (e) {
+    box.textContent = "Не удалось найти сейв: " + e.message;
+    btn.disabled = true;
+  }
+}
+
+async function importState() {
+  setStatus("Импортирую сейв…");
+  try {
+    const title = (state.match && state.match.meta && state.match.meta.title) || "";
+    const res = await postJson("/api/state/import", { title });
+    setMatch(res.match);
+    state.currentName = res.name;
+    state.dirty = false;
+    renderAll();
+    loadMatches();
+    const v = res.validation || {};
+    const warns = (v.warnings || []).length;
+    setStatus("");
+    toast(`Импортировано: ${res.name}` + (warns ? `, предупреждений ${warns}` : ""));
+  } catch (e) {
+    setStatus("");
+    toast(e.message, true);
+  }
+}
+
 /* ---------- события ---------- */
 
 function wireEvents() {
@@ -1046,9 +1101,11 @@ function wireEvents() {
   $("btn-save-as").onclick = () => saveMatch(true);
   $("btn-link").onclick = parseLink;
   $("btn-inbox-import").onclick = importInbox;
+  $("btn-state-import").onclick = importState;
   $("btn-steam-enable").onclick = () => steamShimAction("enable");
   $("btn-steam-disable").onclick = () => steamShimAction("disable");
   refreshInbox();
+  refreshState();
   refreshSteamShim();
   $("link-input").addEventListener("keydown", e => { if (e.key === "Enter") parseLink(); });
   $("btn-csv").onclick = () => exportMatch("csv");

@@ -232,6 +232,7 @@ def _read_tiles(r: _Reader, w: int, hgt: int, version: int) -> dict:
     """Читает тайлы (оракул: координаты каждого тайла), собирает статистику."""
     unit_counts: dict[int, int] = {}
     city_counts: dict[int, int] = {}
+    city_tiles: dict[tuple[int, int], int] = {}
     for row in range(hgt):
         for col in range(w):
             x = r.u32()
@@ -260,8 +261,9 @@ def _read_tiles(r: _Reader, w: int, hgt: int, version: int) -> dict:
                 r.take(2 * k)
                 if r.u16() != 0:
                     r.take(2)               # rebellion buffer
-                if imp_type == 1:           # город
+                if imp_type == 1:           # город (или нейтральная деревня)
                     city_counts[tile_owner] = city_counts.get(tile_owner, 0) + 1
+                    city_tiles[(col, row)] = tile_owner
             if r.u8() == 1:                 # юнит
                 r.take(_UNIT_FIXED_SIZE)
                 owner = r.b[r.i - _UNIT_FIXED_SIZE + 4]
@@ -291,7 +293,7 @@ def _read_tiles(r: _Reader, w: int, hgt: int, version: int) -> dict:
             if version >= 105:
                 if r.u8() == 1:
                     r.u32()                 # flooded value
-    return {"units": unit_counts, "cities": city_counts}
+    return {"units": unit_counts, "cities": city_counts, "city_tiles": city_tiles}
 
 
 def _read_players(r: _Reader, version: int) -> list[dict]:
@@ -382,6 +384,7 @@ class StateSection:
     players: list[dict]
     unit_counts: dict[int, int] = field(default_factory=dict)
     city_counts: dict[int, int] = field(default_factory=dict)
+    city_tiles: dict[tuple[int, int], int] = field(default_factory=dict)
     tiles_offset: int = 0
 
 
@@ -407,7 +410,7 @@ def _read_section(r: _Reader, file_version: int) -> StateSection:
     players = _read_players(r, header["version"])
     return StateSection(header=header, players=players,
                         unit_counts=stats["units"], city_counts=stats["cities"],
-                        tiles_offset=tiles_offset)
+                        city_tiles=stats["city_tiles"], tiles_offset=tiles_offset)
 
 
 def _read_actions(r: _Reader, total_actions: int) -> tuple[list[dict], bool]:
@@ -531,78 +534,259 @@ def _real_players(players: list[dict]) -> list[dict]:
     return out
 
 
-def match_from_state(path: Path | str, *, title: str = "", date: str = "",
-                     mode: str = "", map_name: str = "", notes: str = "") -> Match:
-    """Собирает Match из одиночного сейва: ход 0 (если партия шла) и текущий ход."""
-    p = Path(path)
-    save = parse_state_file(p)
-    cur, init = save.current, save.initial
-    turn = int(cur.header["current_turn"])
+def _snapshot_players(section: StateSection) -> list[dict]:
+    """Реальные игроки секции в виде единого формата словарей для снимка."""
+    out = []
+    for p in _real_players(section.players):
+        pid = int(p["id"])
+        out.append({
+            "id": pid,
+            "name": str(p["name"]),
+            "tribe": int(p["tribe"]),
+            "auto_play": int(p.get("auto_play", 1)),
+            "score": int(p["score"]),
+            "stars": int(p.get("currency", 0)),
+            "cities": int(p["num_cities"]),
+            "army": int(section.unit_counts.get(pid, 0)),
+            "kills": int(p["kills"]),
+            "losses": int(p["losses"]),
+        })
+    out.sort(key=lambda x: x["id"])
+    return out
 
-    players_raw = _real_players(cur.players)
-    if not players_raw:
+
+def snapshot_from_save(save: StateSave) -> dict:
+    """Снимок текущего состояния сейва (для разового импорта и наблюдения)."""
+    cur = save.current
+    return {
+        "turn": int(cur.header["current_turn"]),
+        "turn_limit": int(cur.header["turn_limit"]),
+        "map_name": str(cur.header["map_name"]),
+        "save_id": save.save_id,
+        "players": _snapshot_players(cur),
+    }
+
+
+# ---------- история действий: захваты городов ----------
+
+def capture_events(actions: Optional[list[dict]],
+                   city_owners: dict[tuple[int, int], int]) -> dict:
+    """Захваты по ходам из истории действий.
+
+    Возвращает {ход: {player_id: {"captured": n, "lost": n}}}.
+    `city_owners` — владение городами на генерации {(x,y): owner}; обход
+    действий обновляет владельцев. Нейтральные деревни (owner 0) дают захват,
+    но никому не засчитываются в потери; города, построенные уже в партии,
+    в начальной карте отсутствуют — у них нет предыдущего владельца.
+    """
+    owners = dict(city_owners)
+    events: dict[int, dict[int, dict]] = {}
+    for a in actions or []:
+        if int(a.get("type", -1)) != ACTION_CAPTURE_CITY:
+            continue
+        try:
+            payload = bytes.fromhex(a.get("payload", ""))
+        except ValueError:
+            continue
+        if len(payload) < 13:
+            continue
+        pid = int(payload[0])
+        x, y = struct.unpack_from("<II", payload, 5)
+        prev = owners.get((x, y))
+        owners[(x, y)] = pid
+        slot = events.setdefault(int(a.get("turn", 0)), {})
+        me = slot.setdefault(pid, {"captured": 0, "lost": 0})
+        me["captured"] += 1
+        if prev is not None and prev not in (0, NPC_PLAYER_ID) and prev != pid:
+            other = slot.setdefault(prev, {"captured": 0, "lost": 0})
+            other["lost"] += 1
+    return events
+
+
+def events_from_save(save: StateSave) -> dict:
+    """Захваты по ходам для всего сейва (история действий полная)."""
+    return capture_events(save.actions, save.initial.city_tiles)
+
+
+# ---------- сборка Match из снимков ----------
+
+@dataclass
+class WatchSession:
+    """Сеанс наблюдения за партией: снимки по ходам одной игры.
+
+    Идентификатор игры — save_id из трейлера сейва; при смене игры
+    (новая партия поверх старой) история сбрасывается.
+    """
+
+    save_id: Optional[int] = None
+    snapshots: dict = field(default_factory=dict)   # ход -> снимок
+    latest: Optional[StateSave] = None
+    source_path: Optional[Path] = None
+
+    def update(self, save: StateSave, path: Path | str | None = None) -> None:
+        sid = save.save_id
+        if sid is not None and self.save_id is not None and sid != self.save_id:
+            self.snapshots.clear()  # началась другая партия
+        if sid is not None:
+            self.save_id = sid
+        snap = snapshot_from_save(save)
+        self.snapshots[snap["turn"]] = snap   # последний снимок хода побеждает
+        self.latest = save
+        if path is not None:
+            self.source_path = Path(path)
+
+    def turns(self) -> list[int]:
+        return sorted(self.snapshots)
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.snapshots
+
+
+def match_from_snapshots(snapshots, events: Optional[dict] = None, *,
+                         title: str = "", date: str = "", mode: str = "",
+                         map_name: str = "", notes: str = "",
+                         turn_limit: Optional[int] = None,
+                         default_title: str = "Матч из сейва игры") -> Match:
+    """Собирает Match из снимков состояния (ход → игроки) и захватов по ходам.
+
+    Снимки — состояние НА момент записи (score/cities/army); kills/losses в
+    сейве накопительные — в запись попадает прирост относительно предыдущего
+    наблюдавшегося снимка (для первого снимка сеанса — вся сумма; это оговорено
+    в примечаниях матча). Захваты городов — точные, из истории действий.
+    """
+    snaps = sorted(snapshots, key=lambda s: int(s["turn"]))
+    if not snaps:
+        raise ValueError("Нет снимков для импорта")
+    last = snaps[-1]
+    players_snap = sorted(last["players"], key=lambda p: int(p["id"]))
+    if not players_snap:
         raise ValueError("В сейве нет игроков (кроме варваров)")
-    players_raw.sort(key=lambda x: int(x["id"]))
-    init_by_id = {int(x["id"]): x for x in _real_players(init.players)}
-
     players = [
-        Player(name=str(x["name"]), tribe=tribe_name(x.get("tribe")),
-               is_human=not int(x.get("auto_play", 1)))
-        for x in players_raw
+        Player(name=p["name"], tribe=tribe_name(p.get("tribe")),
+               is_human=not int(p.get("auto_play", 1)))
+        for p in players_snap
     ]
+    name_by_id = {int(p["id"]): p["name"] for p in players_snap}
 
     records: list[TurnRecord] = []
-    if turn > 0:
-        # базовая точка: начальное состояние (ход 0)
-        for x in players_raw:
-            pid = int(x["id"])
-            base = init_by_id.get(pid)
-            if base is None:
+    prev: dict[int, dict] = {}
+    for s in snaps:
+        turn = int(s["turn"])
+        for p in s["players"]:
+            pid = int(p["id"])
+            if pid not in name_by_id:
                 continue
+            base = prev.get(pid)
+            kills = max(0, int(p["kills"]) - (int(base["kills"]) if base else 0))
+            losses = max(0, int(p["losses"]) - (int(base["losses"]) if base else 0))
             records.append(TurnRecord(
-                turn=0, player=str(base["name"]),
-                score=float(base["score"]), cities=int(base["num_cities"]),
-                army=int(init.unit_counts.get(pid, 0)),
-                kills=0, losses=0,
+                turn=turn, player=name_by_id[pid],
+                score=float(p["score"]), cities=int(p["cities"]),
+                army=int(p.get("army", 0)),
+                kills=kills, losses=losses,
                 filled={"score", "cities", "army", "kills", "losses"},
             ))
-    for x in players_raw:
-        pid = int(x["id"])
-        base = init_by_id.get(pid, {})
-        kills = max(0, int(x["kills"]) - int(base.get("kills", 0)))
-        losses = max(0, int(x["losses"]) - int(base.get("losses", 0)))
-        records.append(TurnRecord(
-            turn=turn, player=str(x["name"]),
-            score=float(x["score"]), cities=int(x["num_cities"]),
-            army=int(cur.unit_counts.get(pid, 0)),
-            kills=kills, losses=losses,
-            filled={"score", "cities", "army", "kills", "losses"},
-        ))
+            prev[pid] = p
 
-    turn_limit = int(cur.header["turn_limit"]) or None
-    default_notes = (
-        "Импортировано из сейва одиночной игры (.state), формат v"
-        f"{save.file_version}. Точные снимки: начало партии и ход {turn}; "
-        "убийства и потери — суммарно за партию, отнесены к последнему ходу. "
-        "Доход, захваты городов и урон сейв не содержит — этих данных нет."
-    )
-    if not date:
-        try:
-            date = datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d")
-        except OSError:
-            date = datetime.now().strftime("%Y-%m-%d")
+    # захваты из истории действий: сливаем в снимки своего хода,
+    # для ходов без снимков создаём частичную запись
+    for turn, per_player in sorted((events or {}).items()):
+        for pid, ev in per_player.items():
+            name = name_by_id.get(int(pid))
+            if name is None:
+                continue  # варвары и неизвестные — не в матче
+            target = next((r for r in records
+                           if r.turn == turn and r.player == name), None)
+            if target is None:
+                target = TurnRecord(turn=int(turn), player=name, filled=set())
+                records.append(target)
+            target.captured = int(ev.get("captured", 0))
+            target.lost_cities = int(ev.get("lost", 0))
+            target.filled = (target.filled or set()) | {"captured", "lost_cities"}
+
+    if turn_limit is None:
+        turn_limit = int(last.get("turn_limit") or 0) or None
     meta = MatchMeta(
-        title=title or "Матч из сейва игры",
-        date=date,
+        title=title or default_title,
+        date=date or datetime.now().strftime("%Y-%m-%d"),
         mode=mode,
-        map=map_name or str(cur.header["map_name"]),
+        map=map_name or str(last.get("map_name") or ""),
         turn_limit=turn_limit,
-        notes=notes or default_notes,
+        notes=notes,
         source="state",
     )
     match = Match(meta=meta, players=players, records=records)
     match.validate()
     return match
+
+
+def match_from_save(save: StateSave, *, title: str = "", date: str = "",
+                    mode: str = "", map_name: str = "", notes: str = "") -> Match:
+    """Разовый импорт одного сейва: ход 0 (если партия шла) + текущий ход."""
+    cur = save.current
+    turn = int(cur.header["current_turn"])
+    snaps = []
+    if turn > 0:
+        snaps.append({
+            "turn": 0,
+            "turn_limit": cur.header["turn_limit"],
+            "map_name": cur.header["map_name"],
+            "players": _snapshot_players(save.initial),
+        })
+    snaps.append(snapshot_from_save(save))
+    events = events_from_save(save)
+    default_notes = (
+        f"Импортировано из сейва одиночной игры (.state), формат v{save.file_version}. "
+        f"Точные снимки: начало партии и ход {turn}. Убийства и потери — "
+        "накопительные счётчики, прирост за партию отнесён к последнему ходу. "
+        "Захваты городов — по ходам из истории действий игры. "
+        "Доход и урон сейв не содержит — этих данных нет."
+    )
+    return match_from_snapshots(
+        snaps, events, title=title, date=date, mode=mode, map_name=map_name,
+        notes=notes or default_notes,
+    )
+
+
+def match_from_state(path: Path | str, *, title: str = "", date: str = "",
+                     mode: str = "", map_name: str = "", notes: str = "") -> Match:
+    """Читает сейв одиночной игры и собирает Match."""
+    p = Path(path)
+    save = parse_state_file(p)
+    if not date:
+        try:
+            date = datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d")
+        except OSError:
+            date = ""
+    return match_from_save(save, title=title, date=date, mode=mode,
+                           map_name=map_name, notes=notes)
+
+
+def match_from_watch(session: WatchSession, *, title: str = "", date: str = "",
+                     mode: str = "", map_name: str = "", notes: str = "") -> Match:
+    """Матч из снимков сеанса наблюдения (история по ходам)."""
+    if session.is_empty:
+        raise ValueError("Сеанс наблюдения пуст")
+    events = events_from_save(session.latest) if session.latest else {}
+    default_notes = (
+        "Записано наблюдением за сейвом одиночной игры (.state): снимок на "
+        "каждом ходу, захваты городов — из истории действий игры. Убийства и "
+        "потери — прирост между снимками (за первый наблюдавшийся ход — вся "
+        "накопленная сумма). Доход и урон сейв не содержит — этих данных нет."
+    )
+    if not date and session.source_path is not None:
+        try:
+            date = datetime.fromtimestamp(
+                session.source_path.stat().st_mtime).strftime("%Y-%m-%d")
+        except OSError:
+            pass
+    return match_from_snapshots(
+        list(session.snapshots.values()), events,
+        title=title, date=date, mode=mode, map_name=map_name,
+        notes=notes or default_notes,
+        default_title="Партия из сейва (наблюдение)",
+    )
 
 
 # ---------- поиск сейвов ----------

@@ -285,3 +285,110 @@ def test_tribe_table_full():
     assert tribe_name(13) == "Xin-xi"
     assert tribe_name(17) == "Cymanti"
     assert tribe_name(1234) == "Tribe1234"  # запасной вариант для битых данных
+
+
+# ---------- захваты городов из истории действий ----------
+
+def _capture_action(turn: int, pid: int, x: int, y: int) -> dict:
+    import struct as _s
+    payload = bytes([pid]) + _s.pack("<I", 0) + _s.pack("<II", x, y)
+    return {"type": 7, "turn": turn, "player": pid, "payload": payload.hex()}
+
+
+def test_capture_events_village_and_city():
+    # (5,5) — город игрока 2, (3,3) — нейтральная деревня
+    owners = {(5, 5): 2, (3, 3): 0}
+    actions = [
+        _capture_action(0, 2, 3, 3),   # игрок 2 берёт деревню
+        _capture_action(1, 1, 5, 5),   # игрок 1 отнимает город у игрока 2
+        _capture_action(2, 2, 5, 5),   # игрок 2 возвращает город
+    ]
+    ev = state.capture_events(actions, owners)
+    assert ev[0] == {2: {"captured": 1, "lost": 0}}   # деревня: потерь ни у кого
+    assert ev[1] == {1: {"captured": 1, "lost": 0}, 2: {"captured": 0, "lost": 1}}
+    assert ev[2] == {2: {"captured": 1, "lost": 0}, 1: {"captured": 0, "lost": 1}}
+
+
+def test_capture_events_ignores_unknown_and_npc():
+    owners = {(1, 1): 255}
+    actions = [_capture_action(0, 1, 1, 1), _capture_action(0, 1, 9, 9)]
+    ev = state.capture_events(actions, owners)
+    # захват у Nature не даёт потерь; захват построенного в партии города — тоже
+    assert ev[0][1]["captured"] == 2
+    assert ev[0][1]["lost"] == 0
+    assert list(ev[0]) == [1]   # записей про Nature/владельца 0 нет
+
+
+def test_match_from_save_with_synthetic_captures(mid):
+    import copy
+    save = copy.deepcopy(mid)
+    # город игрока 2 из начальной карты
+    victim_coord = next(c for c, owner in save.initial.city_tiles.items() if owner == 2)
+    save.actions = (save.actions or []) + [
+        _capture_action(1, 1, *victim_coord),   # на ходу 1 (есть снимок)
+        _capture_action(3, 2, *victim_coord),   # на ходу 3 (снимка нет → частичная запись)
+    ]
+    match = state.match_from_save(save)
+    kof_t1 = next(r for r in match.records_for("KOF") if r.turn == 1)
+    assert kof_t1.captured == 1 and "captured" in kof_t1.filled
+    assert kof_t1.score == 550  # снимок хода не пострадал
+    nuupi_t1 = next(r for r in match.records_for("Nuupi") if r.turn == 1)
+    assert nuupi_t1.lost_cities == 1
+    # частичная запись хода 3: только захваты
+    nuupi_t3 = next(r for r in match.records_for("Nuupi") if r.turn == 3)
+    assert nuupi_t3.captured == 1
+    assert nuupi_t3.filled == {"captured", "lost_cities"}
+    assert validate_match(match).errors == []
+
+
+# ---------- наблюдение за сейвом (watch) ----------
+
+GENERATION = Path(__file__).parent / "fixtures" / "singleplayer-v124-generation.state"
+
+
+def test_generation_fixture_parses():
+    save = state.parse_state_file(GENERATION)
+    assert save.current.header["map_width"] == 16
+    assert save.current.header["current_turn"] == 0
+    assert save.num_actions == 2
+    # та же партия, что и midgame (один save_id)
+    mid = state.parse_state_file(MIDGAME)
+    assert save.save_id == mid.save_id
+
+
+def test_watch_session_builds_history():
+    sess = state.WatchSession()
+    sess.update(state.parse_state_file(GENERATION), GENERATION)
+    assert sess.turns() == [0]
+    sess.update(state.parse_state_file(MIDGAME), MIDGAME)
+    assert sess.turns() == [0, 1]
+
+    match = state.match_from_watch(sess)
+    assert len(match.players) == 16
+    assert match.meta.source == "state"
+    recs = match.records_for("KOF")
+    assert [r.turn for r in recs] == [0, 1]
+    assert recs[0].score == 515 and recs[0].army == 1
+    assert recs[1].score == 550 and recs[1].army == 3
+    assert validate_match(match).errors == []
+
+
+def test_watch_session_resets_on_new_game():
+    sess = state.WatchSession()
+    sess.update(state.parse_state_file(MIDGAME), MIDGAME)
+    assert sess.turns() == [1]
+    # «игрок начал новую партию» — другой save_id
+    sess.update(state.parse_state_file(FIXTURE), FIXTURE)
+    assert sess.turns() == [0]
+    match = state.match_from_watch(sess)
+    assert match.player_names() == ["KOF", "Shayoszu"]
+
+
+def test_watch_last_snapshot_of_turn_wins():
+    sess = state.WatchSession()
+    sess.update(state.parse_state_file(GENERATION), GENERATION)
+    # повторная запись того же хода (игра перезаписывает сейв на каждое действие)
+    sess.update(state.parse_state_file(GENERATION), GENERATION)
+    assert sess.turns() == [0]
+    match = state.match_from_watch(sess)
+    assert len(match.records_for("KOF")) == 1

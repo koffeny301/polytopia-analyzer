@@ -224,6 +224,8 @@ def _default_state_out() -> Path:
 def cmd_import_state(args: argparse.Namespace) -> int:
     from .importers import state
 
+    if args.watch:
+        return _watch_state(args)
     if args.input:
         inp = Path(args.input).expanduser()
     else:
@@ -255,6 +257,79 @@ def cmd_import_state(args: argparse.Namespace) -> int:
     _print_validation(match)
     _print_summary(match, out.resolve())
     return 1 if rep.errors else 0
+
+
+def _watch_state(args: argparse.Namespace) -> int:
+    """Наблюдение за сейвом: матч дописывается по ходу одиночной партии."""
+    from .importers import state
+
+    explicit = Path(args.input).expanduser() if args.input else None
+    dirs = [explicit.parent] if explicit else state.game_save_dirs()
+    if not dirs or not any(d.is_dir() for d in dirs):
+        print("Ошибка: папка сейвов одиночной игры не найдена.")
+        print("Подсказка: задайте POLYTOPIA_SAVES_DIR или передайте путь к .state")
+        return 1
+    out = Path(args.output).expanduser() if args.output else _default_state_out()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    where = str(explicit) if explicit else ", ".join(str(d) for d in dirs)
+    print(f"Слежу за сейвом: {where}")
+    print(f"Матч пишется в: {out.resolve()}")
+
+    sess = state.WatchSession()
+    last_key = None
+    fails: dict = {}
+    seen_any = False
+    announced_waiting = False
+    try:
+        while True:
+            path = explicit if explicit else state.find_latest_save(dirs)
+            key = None
+            if path is not None:
+                try:
+                    st = path.stat()
+                    key = (str(path), st.st_mtime_ns, st.st_size)
+                except OSError:
+                    key = None
+            if key is None:
+                if not announced_waiting:
+                    print("Сейва пока нет — жду, пока игра создаст его.")
+                    announced_waiting = True
+            elif key != last_key:
+                try:
+                    raw = Path(key[0]).read_bytes()
+                    save = state.parse_state_data(state.decompress_state(raw))
+                    sess.update(save, key[0])
+                    match = state.match_from_watch(
+                        sess, title=args.title, date=args.date,
+                        mode=args.mode, map_name=getattr(args, "map", ""),
+                    )
+                    rep = validate_match(match)
+                    save_match(match, out)
+                    seen_any = True
+                    last_key = key
+                    fails.pop(key, None)
+                    turns = sess.turns()
+                    err = f", ошибок {len(rep.errors)}" if rep.errors else ""
+                    print(f"  ход {turns[-1]}: ходов {len(turns)}, "
+                          f"игроков {len(match.players)}, "
+                          f"записей {len(match.records)}{err}")
+                except (ValueError, OSError) as e:
+                    # файл могли записать не до конца — несколько повторов
+                    n = fails.get(key, 0) + 1
+                    fails[key] = n
+                    if n < 3:
+                        print(f"  пропуск (попытка {n}): {e}")
+                    else:
+                        last_key = key  # сейв стабилен, но не читается — до следующей записи
+                        print(f"  пропуск: {e}")
+            time.sleep(args.interval)
+    except KeyboardInterrupt:
+        print()
+        if seen_any:
+            print(f"Готово. Матч: {out.resolve()}")
+            return 0
+        print("Ни одного снимка не записано.")
+        return 1
 
 
 def _import_inbox_once(directory: Path, out: Path, args) -> tuple[int, Match]:
@@ -487,6 +562,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--mode", default="", help="режим (Might/Perfection/…)")
     p.add_argument("--map", default="", help="название карты")
     p.add_argument("--date", default="", help="дата матча (YYYY-MM-DD)")
+    p.add_argument("--watch", action="store_true",
+                   help="следить за сейвом и писать матч по ходу партии")
+    p.add_argument("--interval", type=float, default=2.0,
+                   help="период опроса сейва в режиме --watch, секунды")
     p.set_defaults(func=cmd_import_state)
 
     p = sub.add_parser("web", help="запустить локальный веб-интерфейс (localhost)")
