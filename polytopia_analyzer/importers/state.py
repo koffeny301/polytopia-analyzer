@@ -6,18 +6,21 @@
 Singleplayer/` (Windows). Это полный снимок партии: LZ4-блок, внутри
 начальное состояние (ход 0), текущее состояние и история действий.
 
-Формат (v124, игра 2.18) reverse-engineered Samuel Yuan (MIT License):
+Формат (v124, игра 2.18) reverse-engineered Samuel Yuan (MIT):
 PolytopiaSaveEditor / polytopiamapmodelgo / PolytopiaWorld / PolyVision;
-расхождения v124 против опубликованной v122 найдены эмпирически на живом
-сейве и зафиксированы тестами (docs/state-format.md):
+расхождения v124 против опубликованной v122 найдены эмпирически на живых
+сейвах и зафиксированы тестами (docs/state-format.md):
 
-  * файл: [u32 версия][начальное состояние][непрозрачный разделитель]
-          [текущее состояние][разделитель 2Б][действия][хвост];
+  * файл: [u32 версия][начальное состояние][разделитель 11Б с save_id]
+          [текущее состояние][2Б][u16 numActions][действия][трейлер];
   * версия состояния (u32) открывается КАЖДАЯ секция, в v122-библиотеке
     вторая копия принималась за «Version2» первого заголовка;
   * после каждой записи игрока стоит контрольный байт == tribe;
-  * между секциями и в конце файла появились непрозрачные байты
-    (в образце — константа сейва `a6 59 b4 07`), они не интерпретируются.
+  * трейлер: [00 00 00][save_id u32][TA u16][flag u8][сессия с UUID сейва…];
+    save_id совпадает с разделителем секций — оракул границы действий.
+
+Проверено на двух живых сейвах: 14×14/3 игрока (ход 0) и 16×16/17 игроков
+(70 действий, 31 юнит, ход 1).
 
 Целостность гарантируют оракулы (любое рассогласование — ошибка, молчаливых
 пропусков нет): координаты всех тайлов (x,y)==(col,row), контрольный байт
@@ -393,6 +396,7 @@ class StateSave:
     actions: Optional[list[dict]] = None
     num_actions: Optional[int] = None
     trailer: bytes = b""
+    save_id: Optional[int] = None
     decompressed_size: int = 0
 
 
@@ -407,9 +411,14 @@ def _read_section(r: _Reader, file_version: int) -> StateSection:
 
 
 def _read_actions(r: _Reader, total_actions: int) -> tuple[list[dict], bool]:
-    """Читает поток действий. Возвращает (действия, все_типы_известны)."""
+    """Читает поток действий. Возвращает (действия, все_типы_известны).
+
+    Нумерация ходов 0-based, синхронно current_turn заголовка: действия
+    первого круга происходят на ходу 0, круг закрывает EndTurn природы
+    (player 255), после счётчик растёт.
+    """
     actions: list[dict] = []
-    turn = 1
+    turn = 0
     for _ in range(total_actions):
         at = r.u16()
         size = ACTION_SIZES.get(at)
@@ -464,7 +473,12 @@ def parse_state_data(data: bytes) -> StateSave:
         raise ValueError(
             "Не удалось найти текущее состояние в сейве (рассинхрон формата)")
 
-    # Действия: numActions обязан совпасть с TotalActions заголовка.
+    # Действия: numActions обязан совпасть с TotalActions заголовка,
+    # а трейлер за действиями — с оракулом: [00 00 00][save_id u32][TA u16].
+    # save_id — константа сейва, лежит и в разделителе секций (gap[7:11]).
+    save_id: Optional[int] = None
+    if len(gap_bytes) >= 11:
+        save_id = struct.unpack_from("<I", gap_bytes, 7)[0]
     total_actions = current.header["total_actions"]
     actions: Optional[list[dict]] = None
     num_actions: Optional[int] = None
@@ -479,14 +493,21 @@ def parse_state_data(data: bytes) -> StateSave:
         except (EOFError, struct.error):
             continue
         rest = data[probe.i:]
-        if not complete or len(rest) > 64:
+        if not complete:
+            continue
+        if (len(rest) < 9 or rest[0:3] != b"\x00\x00\x00"
+                or struct.unpack_from("<H", rest, 7)[0] != total_actions):
+            continue
+        if save_id is not None and struct.unpack_from("<I", rest, 3)[0] != save_id:
             continue
         actions, num_actions, trailer = acts, total_actions, rest
         break
+    if save_id is None and len(trailer) >= 7:
+        save_id = struct.unpack_from("<I", trailer, 3)[0]
 
     return StateSave(file_version=file_version, initial=initial, current=current,
                      gap_bytes=gap_bytes, actions=actions, num_actions=num_actions,
-                     trailer=trailer, decompressed_size=len(data))
+                     trailer=trailer, save_id=save_id, decompressed_size=len(data))
 
 
 def parse_state_file(path: Path | str) -> StateSave:

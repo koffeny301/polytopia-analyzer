@@ -149,8 +149,9 @@ def test_match_from_state(save, tmp_path):
     match = state.match_from_state(FIXTURE)
     assert [p.name for p in match.players] == ["KOF", "Shayoszu"]
     kof = match.player("KOF")
-    assert kof.tribe == "Tribe7"        # таблица племён расширяется по мере проверки
+    assert kof.tribe == "Imperius"        # tribe 7 — полная таблица в shim.TRIBE_NAMES
     assert kof.is_human is True
+    assert match.player("Shayoszu").tribe == "Xin-xi"
     assert match.player("Shayoszu").is_human is False
 
 
@@ -189,3 +190,98 @@ def test_nature_never_in_match(save):
     match = state.match_from_state(FIXTURE)
     assert "Nature" not in match.player_names()
     assert all(r.player != "Nature" for r in match.records)
+
+
+# ---------- сейв средней партии (16×16, 17 игроков, 70 действий) ----------
+
+MIDGAME = Path(__file__).parent / "fixtures" / "singleplayer-v124-midgame.state"
+
+
+@pytest.fixture(scope="module")
+def mid():
+    return state.parse_state_file(MIDGAME)
+
+
+def test_midgame_header(mid):
+    h = mid.current.header
+    assert h["map_width"] == 16 and h["map_height"] == 16
+    assert h["current_turn"] == 1
+    assert h["total_actions"] == 70
+    assert h["difficulty"] == 3
+    assert h["seed"] == 1715778920
+
+
+def test_midgame_players(mid):
+    assert len(mid.current.players) == 17
+    by_id = {p["id"]: p for p in mid.current.players}
+    kof = by_id[1]
+    assert kof["tribe"] == 9 and kof["score"] == 550
+    assert kof["currency"] == 8 and kof["num_cities"] == 1
+    lifidee = by_id[12]
+    assert lifidee["name"] == "Lïfïdee" and lifidee["score"] == 940
+    assert lifidee["tech"] == [0, 22, 1, 10]
+
+
+def test_midgame_initial_section(mid):
+    # начальное состояние = генерация мира ДО выдачи стартовых технологий
+    by_id = {p["id"]: p for p in mid.initial.players}
+    assert all(p["tech"] == [] for p in by_id.values())
+    assert by_id[1]["score"] == 515 and by_id[1]["currency"] == 2  # Luxidoor: 2 звезды, без теха
+    assert by_id[2]["score"] == 430           # Polaris: 405 карта + 25 Mooni (5★), без Frostwork
+    assert by_id[3]["score"] == 430           # Vengir: +25 Swordsman, позже 730 после Smithery t3
+    assert by_id[16]["score"] == 410          # Aquarion 415 − 5 (угловой спавн)
+    assert mid.initial.unit_counts[1] == 1    # один стартовый юнит
+
+
+def test_midgame_units(mid):
+    assert mid.current.unit_counts == {
+        1: 3, 2: 2, 3: 2, 4: 2, 5: 2, 6: 1, 7: 2, 8: 1,
+        9: 3, 10: 2, 11: 2, 12: 2, 13: 2, 14: 2, 15: 1, 16: 2,
+    }
+    assert mid.current.city_counts == {i: 1 for i in range(1, 17)}
+
+
+def test_midgame_actions(mid):
+    assert mid.actions is not None and mid.num_actions == 70
+    assert len(mid.actions) == 70
+    kinds = {}
+    for a in mid.actions:
+        kinds[a["type"]] = kinds.get(a["type"], 0) + 1
+    assert kinds == {1: 7, 2: 3, 5: 13, 6: 17, 8: 9, 11: 2, 15: 17, 18: 1, 20: 1}
+    assert kinds[15] == 17  # EndTurn: 16 игроков + Nature — ровно один круг
+    # ходы 0-based, синхронно с current_turn заголовка
+    assert max(a["turn"] for a in mid.actions) == 1 == mid.current.header["current_turn"]
+
+
+def test_midgame_save_id_and_trailer(mid):
+    assert mid.save_id is not None and mid.save_id != 0
+    # save_id одинаков в разделителе секций и в трейлере
+    assert mid.gap_bytes[7:11] == mid.trailer[3:7]
+    # трейлер: [00 00 00][save_id][TA u16]
+    assert mid.trailer[0:3] == b"\x00\x00\x00"
+    import struct
+    assert struct.unpack_from("<H", mid.trailer, 7)[0] == 70
+
+
+def test_midgame_match(mid):
+    match = state.match_from_state(MIDGAME)
+    assert len(match.players) == 16
+    assert "Nature" not in match.player_names()
+    kof = match.player("KOF")
+    assert kof.tribe == "Luxidoor" and kof.is_human
+    recs = match.records_for("KOF")
+    assert [r.turn for r in recs] == [0, 1]
+    assert recs[0].score == 515 and recs[0].army == 1
+    assert recs[1].score == 550 and recs[1].army == 3
+    assert recs[1].kills == 0 and recs[1].losses == 0
+    rep = validate_match(match)
+    assert rep.errors == []
+
+
+def test_tribe_table_full():
+    from polytopia_analyzer.importers.shim import TRIBE_NAMES, tribe_name
+    assert len(TRIBE_NAMES) == 17
+    assert tribe_name(9) == "Luxidoor"
+    assert tribe_name(13) == "Xin-xi"
+    assert tribe_name(17) == "Cymanti"
+    assert tribe_name(1234) == "Tribe1234"  # запасной вариант для битых данных

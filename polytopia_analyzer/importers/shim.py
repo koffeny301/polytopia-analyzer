@@ -29,15 +29,33 @@ from typing import Iterable, Optional
 
 from ..models import Match, MatchMeta, Player, TurnRecord
 
-# TribeType: 1/15/16 проверено шимом на реальном матче (KOF — Polaris,
-# Goylem — Zebasi); 4 — по конвертеру PolyVision (5517 реальных сейвов
-# Bardur, см. docs/state-format.md). Остальные ids добавлять только после
-# сверки с игрой; до этого работает запасной вариант Tribe<n>.
+# TribeType — runtime-enum игры, одинаков в снимках шима и в .state-сейвах.
+# Полная таблица собрана по живому сейву 16×16 с 16 ИИ: имя каждого бота
+# принадлежит своему племени (gist «Polytopia Tribe Names from Bots»), каждое
+# соответствие подтверждено стартовым счётом/звёздами из независимой таблицы
+# (Agentcounter/tribes.md). Контрольные якоря: 1/15/16 — шим на реальном
+# матче (KOF — Polaris, Goylem — Zebasi); 4 — конвертер PolyVision (5517
+# сейвов Bardur). 9 = Luxidoor — исключением (остальные id заняты) + контроль
+# (уникальные 2 стартовые звезды). Непроверенных id не осталось; для битых
+# данных запасной вариант Tribe<n> сохраняется.
 TRIBE_NAMES = {
     1: "Nature",
+    2: "Ai-Mo",
+    3: "Aquarion",
     4: "Bardur",
+    5: "Elyrion",
+    6: "Hoodrick",
+    7: "Imperius",
+    8: "Kickoo",
+    9: "Luxidoor",
+    10: "Oumaji",
+    11: "Quetzali",
+    12: "Vengir",
+    13: "Xin-xi",
+    14: "Yadakk",
     15: "Zebasi",
     16: "Polaris",
+    17: "Cymanti",
 }
 NPC_TRIBE_ID = 1          # варвары
 NPC_PLAYER_ID = 255
