@@ -215,6 +215,30 @@ turn,player,score,income,...
 
 PolyMod-импортёр (M3) появится здесь же после получения образца экспорта.
 
+### 7.2 Пути данных (`paths.py`) и упаковка (`packaging/`)
+
+`paths.py` — единственное место, где решаются пути:
+
+- `matches_dir()` — `POLYTOPIA_DATA_DIR`, иначе `data/` в репозитории, иначе
+  `~/.local/share/polytopia-analyzer/matches` (в onefile рядом с кодом данных быть
+  не может: код распаковывается во временную папку);
+- `inbox_dir()` — куда шим пишет снимки (`POLYREAD_DUMP_DIR` для переопределения);
+- `shim_bin_dir()` — куда ставится `libpolyread_dump.so`;
+- `user_state_dir()` — корень всего (`POLYTOPIA_STATE_DIR`).
+
+`packaging/` — установщик и ярлык:
+
+- `entry.py` — точка входа для PyInstaller (в `cli.py` относительные импорты,
+  запускать его как скрипт нельзя);
+- `install.sh` — ставит бинарник в `~/.local/bin`, иконку и `.desktop` в меню,
+  `--uninstall` убирает всё (данные не трогает);
+- `polytopia-analyzer.desktop.in` — ярлык; запускает `web`, `Terminal=false`;
+- `icon.svg`.
+
+`scripts/build_release.sh` собирает шим, копирует его в
+`polytopia_analyzer/assets/bin/` (внутрь onefile), запускает PyInstaller,
+раскладывает архив с установщиком, инструкцией и контрольной суммой.
+
 ## 8. Отчёт (`report.py`)
 
 Отчёт — **один HTML-файл без внешних зависимостей**:

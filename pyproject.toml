@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "polytopia-match-analyzer"
-version = "0.1.0"
+version = "0.2.0"
 description = "Анализ матчей The Battle of Polytopia: HTML-отчёты в стиле Civilization"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,6 +12,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+build = ["pyinstaller>=6.10"]
 ocr = ["pillow>=10", "pytesseract>=0.3.10"]
 
 [project.scripts]
@@ -21,7 +22,7 @@ polytopia-analyzer = "polytopia_analyzer.cli:main"
 include = ["polytopia_analyzer*"]
 
 [tool.setuptools.package-data]
-polytopia_analyzer = ["assets/*.js", "assets/*.html"]
+polytopia_analyzer = ["assets/*.js", "assets/*.html", "assets/bin/*.so"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

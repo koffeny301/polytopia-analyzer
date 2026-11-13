@@ -184,9 +184,6 @@ def match_from_inbox(directory: Path | str, *, title: str = "", date: str = "",
 
 def default_inbox_dir() -> Path:
     """Папка, в которую пишет шим (см. shim/run-dump.sh)."""
-    import os
+    from .. import paths
 
-    env = os.environ.get("POLYREAD_DUMP_DIR")
-    if env:
-        return Path(env)
-    return Path.home() / ".local/share/polytopia-analyzer/inbox"
+    return paths.inbox_dir()

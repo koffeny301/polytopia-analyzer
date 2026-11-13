@@ -67,7 +67,21 @@ polytopia-analyzer install-shim disable --restart-steam   # откат
 PolyMod на Steam/Proton, разбор `.state`-сейвов, OCR-скриншоты) — формат матча
 от источника не зависит.
 
-## Установка
+## Установка для игрока (без терминала)
+
+Готовая сборка — один исполняемый файл, Python ставить не нужно.
+
+1. Распакуйте `polytopia-analyzer-<версия>-linux-x86_64.tar.gz`.
+2. Запустите `install.sh` из папки (двойной клик). Без установки тоже работает:
+   просто запустите файл `polytopia-analyzer`.
+3. В меню приложений появится **«Анализатор матчей Polytopia»** — при запуске
+   открывается браузер с локальной страницей.
+
+Дальше: карточка «Чтение из игры (Steam)» → «Включить», открыть реплей по ссылке,
+«Импортировать снимки», «Построить отчёт». Подробная инструкция для игрока —
+`docs/PLAYER.md` (копируется в архив как `README.md`).
+
+## Установка из исходников
 
 ```bash
 cd /mnt/data/проекты/polytopia-match-analyzer
@@ -240,6 +254,27 @@ turn,player,score,income,army,cities,kills,losses,captured,lost_cities,damage
 Отчёт самодостаточен: plotly.js встроен в HTML (~1 МБ), интернет не нужен.
 Флаг `--cdn` уменьшает файл, но требует сеть при просмотре.
 
+## Сборка релиза
+
+```bash
+scripts/build_release.sh          # шим + onefile + установщик + архив
+```
+
+Результат в `dist/`:
+
+```
+polytopia-analyzer-0.2.0-linux-x86_64/
+    polytopia-analyzer          один файл ~45 МБ (Python внутри)
+    install.sh                  ставит в ~/.local + ярлык в меню
+    polytopia-analyzer.desktop.in, icon.svg
+    README.md                   инструкция для игрока (docs/PLAYER.md)
+polytopia-analyzer-0.2.0-linux-x86_64.tar.gz (+ .sha256)
+```
+
+Сборка кладёт `libpolyread_dump.so` внутрь пакета (`polytopia_analyzer/assets/bin/`),
+поэтому `install-shim` работает без компилятора и `make`. Нужен только PyInstaller:
+`.venv/bin/pip install -e ".[build]"`.
+
 ## Разработка
 
 ```bash
@@ -261,6 +296,7 @@ polytopia_analyzer/
 ├── report.py     # HTML-отчёт с plotly.js
 ├── webapp.py     # локальный веб-сервер (HTTP API)
 ├── importers/    # ocr.py — числа с табло; shim.py — снимки состояния игры
+├── paths.py      # где данные: репозиторий или ~/.local/share (onefile)
 ├── steam.py      # параметры запуска Steam: включить/выключить шим, откат
 ├── cli.py        # analyze / template / open / convert / install-shim / import-inbox / web
 └── assets/       # plotly-basic.min.js, webui.html
@@ -270,6 +306,7 @@ polytopia_analyzer/
 
 - [x] Чтение состояния игры шимом LD_PRELOAD на Linux (v0.2, M6.1–M6.3)
 - [x] Установщик строки запуска Steam вместо временной обёртки (v0.2, M6.4)
+- [x] Сборка и распространение: onefile, установщик, ярлык, инструкция (v0.2, M8)
 - [ ] Адаптер экспорта PolyMod (JSON состояния из Steam-клиента)
 - [ ] Парсер `.state`-сейвов одиночной игры (LZ4 + бинарный формат)
 - [x] OCR-распознавание экрана счёта из игры/скриншотов (v0.2, M4)

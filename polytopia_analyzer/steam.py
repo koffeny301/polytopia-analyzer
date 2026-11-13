@@ -83,13 +83,17 @@ def game_dir_default() -> Path:
 
 
 def shim_install_path() -> Path:
-    return Path.home() / ".local/share/polytopia-analyzer/bin" / SHIM_NAME
+    from . import paths
+
+    return paths.shim_bin_dir() / SHIM_NAME
 
 
 def launch_line(shim: Optional[Path] = None, inbox: Optional[Path] = None) -> str:
     """Строка запуска Steam: переменные + %command%."""
+    from . import paths
+
     shim = shim or shim_install_path()
-    inbox = inbox or Path.home() / ".local/share/polytopia-analyzer/inbox"
+    inbox = inbox or paths.inbox_dir()
     return f"POLYREAD_DUMP={inbox} LD_PRELOAD={shim} %command%"
 
 
@@ -283,7 +287,9 @@ def enable(config: Optional[Path] = None, appid: str = APPID, shim: Optional[Pat
     """Включает чтение: пишет LaunchOptions. Возвращает отчёт о действии."""
     cfg = config or default_config_path()
     shim = shim or shim_install_path()
-    inbox = inbox or Path.home() / ".local/share/polytopia-analyzer/inbox"
+    from . import paths
+
+    inbox = inbox or paths.inbox_dir()
     if not shim.is_file():
         raise FileNotFoundError(
             f"Шим не найден: {shim}. Соберите: make -C shim и скопируйте {SHIM_NAME} "

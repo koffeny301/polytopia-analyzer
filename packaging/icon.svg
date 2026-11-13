@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- Иконка: низкополигональный кристалл-остров с мечом -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b2f4a"/>
+      <stop offset="1" stop-color="#141726"/>
+    </linearGradient>
+    <linearGradient id="land" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6fd08c"/>
+      <stop offset="1" stop-color="#2f8f63"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="22" fill="url(#sky)"/>
+  <polygon points="64,14 96,34 64,54 32,34" fill="#3d4a7a"/>
+  <polygon points="32,34 64,54 64,96 32,72" fill="#2f8f63"/>
+  <polygon points="96,34 64,54 64,96 96,72" fill="url(#land)"/>
+  <polygon points="64,54 78,60 64,72 50,60" fill="#8fe6a8" opacity="0.85"/>
+  <g stroke="#f4d35e" stroke-width="4" stroke-linecap="round" fill="none">
+    <path d="M64 20 L64 46"/>
+    <path d="M56 30 L64 20 L72 30"/>
+  </g>
+</svg>

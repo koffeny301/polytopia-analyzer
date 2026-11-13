@@ -208,8 +208,10 @@ def cmd_convert(args: argparse.Namespace) -> int:
 # ---------- import-inbox ----------
 
 def _default_shim_out() -> Path:
+    from . import paths
+
     stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M")
-    return Path("data") / f"shim-{stamp}.json"
+    return paths.matches_dir() / f"shim-{stamp}.json"
 
 
 def _import_inbox_once(directory: Path, out: Path, args) -> tuple[int, Match]:
@@ -267,6 +269,15 @@ def cmd_import_inbox(args: argparse.Namespace) -> int:
 
 # ---------- install-shim ----------
 
+def _bundled_shim_candidates() -> list[Path]:
+    """Где искать собранный шим: в упаковке (onefile) и в репозитории."""
+    assets = Path(__file__).resolve().parent / "assets" / "bin"
+    return [
+        assets / "libpolyread_dump.so",                       # внутри пакета/onefile
+        Path(__file__).resolve().parents[1] / "shim" / "libpolyread_dump.so",  # репозиторий
+    ]
+
+
 def _ensure_shim_installed(explicit: str | None) -> Path:
     """Копирует собранный шим в стабильный путь, если его там нет."""
     from . import steam as steam_mod
@@ -274,14 +285,15 @@ def _ensure_shim_installed(explicit: str | None) -> Path:
     target = Path(explicit).expanduser() if explicit else steam_mod.shim_install_path()
     if target.is_file():
         return target
-    built = Path(__file__).resolve().parents[1] / "shim" / steam_mod.SHIM_NAME
-    if built.is_file():
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(built, target)
-        print(f"Шим установлен: {target}")
-        return target
+    for built in _bundled_shim_candidates():
+        if built.is_file():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(built, target)
+            print(f"Шим установлен: {target}")
+            return target
     raise FileNotFoundError(
-        f"Шим не собран: нет {target} и {built}. Соберите: make -C shim")
+        "Шим не собран. В готовой сборке он лежит рядом с программой; "
+        "в репозитории соберите его: make -C shim")
 
 
 def cmd_install_shim(args: argparse.Namespace) -> int:

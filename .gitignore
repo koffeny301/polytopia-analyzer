@@ -8,3 +8,7 @@ build/
 reports/
 data/
 shim/*.so
+polytopia_analyzer/assets/bin/
+dist/
+build/
+*.spec

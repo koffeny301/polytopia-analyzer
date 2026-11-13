@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from . import __version__
 from .importers import ocr as ocr_mod
 from .importers import shim as shim_mod
+from . import paths
 from . import steam as steam_mod
 from .links import extract_game_id, mobile_link, share_link, steam_link
 from .report import build_report
@@ -37,7 +38,7 @@ from .storage import (
 
 ASSETS_DIR = Path(__file__).parent / "assets"
 INDEX_HTML = ASSETS_DIR / "webui.html"
-DEFAULT_DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+DEFAULT_DATA_DIR = paths.matches_dir()
 MAX_BODY_BYTES = 15 * 1024 * 1024
 ALLOWED_SUFFIXES = (".json", ".csv")
 
@@ -352,7 +353,11 @@ def serve(host: str = "127.0.0.1", port: int = 8765,
     print(f"Каталог матчей: {httpd.data_dir}")
     print("Остановка: Ctrl+C")
     if open_browser:
-        threading.Timer(0.7, lambda: webbrowser.open(url)).start()
+        def _open() -> None:
+            if not webbrowser.open(url):
+                print(f"Браузер не открылся автоматически — откройте вручную: {url}")
+
+        threading.Timer(0.7, _open).start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

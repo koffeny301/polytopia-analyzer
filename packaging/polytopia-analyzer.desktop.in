@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Polytopia Analyzer
+Name[ru]=Анализатор матчей Polytopia
+Comment=Анализ матчей The Battle of Polytopia: отчёты и графики
+Comment[ru]=Анализ матчей The Battle of Polytopia: отчёты и графики
+Exec=@EXEC@ web
+Icon=@ICON@
+Terminal=false
+Categories=Game;
+StartupNotify=false
+StartupWMClass=polytopia-analyzer
+Keywords=polytopia;polytopia analyzer;match;analysis;replay;
+Keywords[ru]=политония;политопия;матч;анализ;реплей;
