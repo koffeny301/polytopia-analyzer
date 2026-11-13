@@ -17,7 +17,9 @@
  * Грабли, из-за которых сделано именно так (см. shim/README.md):
  *   - il2cpp_* нельзя звать во время il2cpp_init → пауза после загрузки движка;
  *   - free() на il2cpp_type_get_name() валит процесс → не освобождаем;
- *   - il2cpp_thread_attach() из своего потока валит процесс → не зовём;
+ *   - поток регистрируется в IL2CPP (il2cpp_thread_attach) сразу после резолва:
+ *     без этого первая же аллокация в метаданных даёт abort
+ *     "Collecting from unknown thread" — падает вся игра;
  *   - опрос из fork-ребёнка невозможен → работаем в потоке игры, но аккуратно.
  */
 #define _GNU_SOURCE
@@ -76,6 +78,7 @@ typedef int (*fn_class_array_element_size)(Il2CppClass *);
 typedef size_t (*fn_class_instance_size)(Il2CppClass *);
 typedef Il2CppClass *(*fn_field_get_parent)(FieldInfo *);
 typedef Il2CppClass *(*fn_class_get_parent)(Il2CppClass *);
+typedef void *(*fn_thread_attach)(Il2CppDomain *);
 
 static struct api {
     fn_domain_get domain_get;
@@ -103,6 +106,7 @@ static struct api {
     fn_class_instance_size class_instance_size;
     fn_field_get_parent field_get_parent;
     fn_class_get_parent class_get_parent;
+    fn_thread_attach thread_attach;
 } A;
 
 static char g_outdir[1024];
@@ -225,6 +229,12 @@ static FieldInfo *w_cls_fields(Il2CppClass *k, void **it) {
     if (G_TRY) { r = A.class_get_fields(k, it); g_guard = 0; } else g_guard = 0;
     return r;
 }
+static void *w_attach(Il2CppDomain *d) {
+    void *r = NULL;
+    if (G_TRY) { r = A.thread_attach(d); g_guard = 0; } else g_guard = 0;
+    return r;
+}
+
 static Il2CppClass *w_obj_class(Il2CppObject *o) {
     Il2CppClass *r = NULL;
     if (G_TRY) { r = A.object_get_class(o); g_guard = 0; } else g_guard = 0;
@@ -317,6 +327,7 @@ static int resolve_all(void *h) {
         {"il2cpp_class_instance_size", (void **)&A.class_instance_size},
         {"il2cpp_field_get_parent", (void **)&A.field_get_parent},
         {"il2cpp_class_get_parent", (void **)&A.class_get_parent},
+        {"il2cpp_thread_attach", (void **)&A.thread_attach},
     };
     for (size_t i = 0; i < sizeof(tab) / sizeof(tab[0]); ++i) {
         *tab[i].slot = dlsym(h, tab[i].name);
@@ -845,6 +856,22 @@ static void watch_tacts(void) {
     }
 }
 
+/* ---------- фильтр «только реплей» ----------
+ * В живом матче читать состояние нельзя: это нечестная игра. Признак реплея —
+ * класс клиента: ReplayClient против LocalClient/RemoteClient/HotseatClient.
+ * Если признак не подтверждён, снимки не пишутся (fail-closed). */
+static char g_client_class[96];
+static int g_replay_only = 1;
+static int g_live_noted = 0;
+
+static int replay_mode_ok(void) {
+    if (!g_replay_only) return 1;
+    const char *need = getenv("POLYREAD_DUMP_REQUIRE");
+    if (!need || !*need) need = "ReplayClient";
+    if (!g_client_class[0]) return 0;           /* клиент ещё не найден */
+    return strstr(g_client_class, need) != NULL;
+}
+
 /* живое состояние из клиента: ClientBase.currentGameState */
 static void *state_from_client(Il2CppClass *gm_cls, char *where, size_t cap) {
     if (!gm_cls) return NULL;
@@ -865,6 +892,8 @@ static void *state_from_client(Il2CppClass *gm_cls, char *where, size_t cap) {
             void *st = f_ptr(h, hc, fields[k]);
             logf_("    %s.%s = %p", holders[i], fields[k], st);
             if (ptr_ok(st) && class_is(st, g_gamestate_cls)) {
+                const char *cn = A.class_get_name(hc);
+                snprintf(g_client_class, sizeof(g_client_class), "%s", cn ? cn : "");
                 snprintf(where, cap, "GameManager.%s.%s", holders[i], fields[k]);
                 return st;
             }
@@ -966,6 +995,7 @@ static void run_dump(void) {
     sleep((unsigned)delay);
     logf_("движок загружен через %.1f с, старт через %d с", waited / 10.0, delay);
 
+    if (getenv("POLYREAD_DUMP_ALLOW_LIVE")) g_replay_only = 0;
     const char *find_only = getenv("POLYREAD_DUMP_FIND");
     int interval = 300;
     const char *iv = getenv("POLYREAD_DUMP_INTERVAL");
@@ -978,6 +1008,14 @@ static void run_dump(void) {
     /* защита от падений ставится ДО любых чтений объектов: статическое поле
      * неинициализированного класса читается по нулевому указателю */
     install_guards();
+
+    /* Поток обязан быть известен GC: иначе первая же аллокация в метаданных
+     * приводит к abort "Collecting from unknown thread". */
+    if (!getenv("POLYREAD_DUMP_NO_ATTACH") && A.thread_attach) {
+        Il2CppDomain *d0 = w_domain();
+        void *th = d0 ? w_attach(d0) : NULL;
+        logf_("thread_attach: domain=%p thread=%p", (void *)d0, th);
+    }
 
     Il2CppDomain *dom = w_domain();
     if (!dom) { logf_("домен NULL — выходим"); return; }
@@ -1051,6 +1089,17 @@ static void run_dump(void) {
                 if (gs) logf_("GameState появился: %s", where);
             }
         } else {
+            if (!replay_mode_ok()) {
+                if (!g_live_noted) {
+                    logf_("не реплей (клиент «%s») — снимки не пишем; "
+                          "обход для отладки: POLYREAD_DUMP_ALLOW_LIVE=1",
+                          g_client_class[0] ? g_client_class : "неизвестен");
+                    g_live_noted = 1;
+                }
+                usleep((useconds_t)interval * 1000);
+                continue;
+            }
+            if (g_live_noted) { logf_("режим реплея — снимки включены"); g_live_noted = 0; }
             int turn = 0;
             if (snapshot(gs, &turn)) {
                 write_snapshot(turn, 0);

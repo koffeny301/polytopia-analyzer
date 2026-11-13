@@ -37,10 +37,14 @@ polytopia-analyzer install-shim disable --restart-steam
 |---|---|
 | `POLYREAD_PROBE=1` или `=/путь` | включает пробник (без неё `.so` ничего не делает) |
 | `POLYREAD_PROBE_DELAY=6` | пауза после загрузки движка, секунды |
-| `POLYREAD_PROBE_ATTACH=1` | вызвать `il2cpp_thread_attach` (по умолчанию нет — валит процесс) |
+| `POLYREAD_PROBE_ATTACH=1` | вызвать `il2cpp_thread_attach` (в пробнике по умолчанию нет) |
 | `POLYREAD_PROBE_FORK=1` | опрос из дочернего процесса (не работает, оставлено для диагностики) |
 | `POLYREAD_PROBE_FORCE=1` | игнорировать проверку имени исполняемого файла |
 | `POLYREAD_DUMP=1` или `=/путь` | включает дамп состояния (6.2) |
+| — | **пишет только в реплее**: клиент игры должен быть `ReplayClient`, иначе снимков нет |
+| `POLYREAD_DUMP_ALLOW_LIVE=1` | снять фильтр «только реплей» (отладка; в живом матче не использовать) |
+| `POLYREAD_DUMP_REQUIRE=<класс>` | какой класс клиента считать реплеем (по умолчанию `ReplayClient`) |
+| `POLYREAD_DUMP_NO_ATTACH=1` | не регистрировать поток в IL2CPP (по умолчанию регистрируем — иначе GC роняет игру) |
 | `POLYREAD_DUMP_FIND=1` | только найти `GameState`, без снимков |
 | `POLYREAD_DUMP_SWEEP=1` | диагностический смотр объектного графа |
 | `POLYREAD_DUMP_FIELDS="A,B"` | напечатать поля указанных классов |
