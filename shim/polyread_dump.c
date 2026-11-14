@@ -341,6 +341,9 @@ static int resolve_all(void *h) {
 static Il2CppImage *g_images[512];
 static size_t g_nimg = 0;
 static Il2CppClass *g_gamestate_cls, *g_playstate_cls;
+/* разведка 0.5.x: карта (юниты/города) и события (ActionStack) */
+static Il2CppClass *g_mapdata_cls, *g_tiledata_cls, *g_unitstate_cls;
+static Il2CppClass *g_impstate_cls, *g_actionbase_cls;
 
 static int class_is(Il2CppObject *o, Il2CppClass *k) {
     if (!ptr_ok(o) || !k) return 0;
@@ -396,6 +399,16 @@ static int f_u8(void *obj, Il2CppClass *k, const char *name, uint8_t *out) {
     FieldInfo *f = cls_field(k, name);
     if (!f || !obj) return 0;
     uint8_t v = 0;
+    if (G_TRY) { A.field_get_value(obj, f, &v); g_guard = 0; }
+    else { g_guard = 0; return 0; }
+    *out = v;
+    return 1;
+}
+
+static int f_u16(void *obj, Il2CppClass *k, const char *name, uint16_t *out) {
+    FieldInfo *f = cls_field(k, name);
+    if (!f || !obj) return 0;
+    uint16_t v = 0;
     if (G_TRY) { A.field_get_value(obj, f, &v); g_guard = 0; }
     else { g_guard = 0; return 0; }
     *out = v;
@@ -470,6 +483,20 @@ static Il2CppClass *find_class_all(const char *name) {
         if (k) return k;
     }
     return NULL;
+}
+
+/* как find_class_all, но сначала игровые сборки: имена вроде TileData
+ * есть и в сборках Unity (UnityEngine.Tilemaps, URP) — они не подходят */
+static Il2CppClass *find_class_pref(const char *name) {
+    static const char *pref[] = {"GameLogicAssembly.dll", "PolytopiaAssembly.dll"};
+    for (size_t p = 0; p < 2; ++p)
+        for (size_t i = 0; i < g_nimg; ++i) {
+            const char *iname = A.image_get_name(g_images[i]);
+            if (!iname || strcmp(iname, pref[p])) continue;
+            Il2CppClass *k = class_by_name_in_image(g_images[i], name);
+            if (k) return k;
+        }
+    return find_class_all(name);
 }
 
 /* Статические поля, тип которых содержит «GameState»: собираем один раз,
@@ -761,7 +788,10 @@ static void sweep(void) {
 }
 
 static int snapshot(void *gs, int *turn_out);
+static int build_snapshot(void *gs, int turn);
 static void write_snapshot(int turn, int force);
+static void collect_events(void *gs);
+static void events_reset(void);
 
 /* печать полей указанных классов: POLYREAD_DUMP_FIELDS="ReplayInterface,Timeline" */
 static void dump_fields_mode(const char *list) {
@@ -846,7 +876,10 @@ static void watch_tacts(void) {
                 int turn = 0;
                 int ok = snapshot(gs, &turn);
                 logf_("    GameState НАЙДЕН: %s, ход=%d, снимок=%d", where, turn, ok);
-                if (ok) write_snapshot(turn, 0);
+                if (ok) {
+                    collect_events(gs);
+                    if (build_snapshot(gs, turn)) { write_snapshot(turn, 1); events_reset(); }
+                }
             } else {
                 logf_("    GameState не найден");
             }
@@ -873,6 +906,9 @@ static int replay_mode_ok(void) {
 }
 
 /* живое состояние из клиента: ClientBase.currentGameState */
+static void *g_client = NULL;
+static Il2CppClass *g_client_cls = NULL;
+
 static void *state_from_client(Il2CppClass *gm_cls, char *where, size_t cap) {
     if (!gm_cls) return NULL;
     FieldInfo *inst = cls_field(gm_cls, "instance");
@@ -895,6 +931,8 @@ static void *state_from_client(Il2CppClass *gm_cls, char *where, size_t cap) {
                 const char *cn = A.class_get_name(hc);
                 snprintf(g_client_class, sizeof(g_client_class), "%s", cn ? cn : "");
                 snprintf(where, cap, "GameManager.%s.%s", holders[i], fields[k]);
+                g_client = h;
+                g_client_cls = hc;
                 return st;
             }
         }
@@ -905,22 +943,306 @@ static void *state_from_client(Il2CppClass *gm_cls, char *where, size_t cap) {
 /* ---------- снимок ---------- */
 static int g_last_turn = -1;
 static unsigned long g_frames = 0, g_written = 0;
-static char g_turn_json[8192];
+static char g_turn_json[65536];
 
+/* Лёгкий опрос: только номер хода (тяжёлая часть — в build_snapshot,
+ * он вызывается лишь в момент смены хода). */
 static int snapshot(void *gs, int *turn_out) {
     int32_t turn = 0;
     if (!f_u32(gs, g_gamestate_cls, "<CurrentTurn>k__BackingField", (uint32_t *)&turn)) return 0;
+    *turn_out = turn;
+    return 1;
+}
+
+/* Карта: армия = юниты на тайлах; производство = сумма production городов
+ * (ImprovementState на тайле). Индексируется по owner (Byte, 0..15; 255 — варвары).
+ * Дополнительно собирает список городов/улучшений для диффа между ходами
+ * (захваты = смена владельца, постройка = новая запись). */
+typedef struct { int32_t x; int32_t y; } wc2;
+
+static int f_wc(void *obj, Il2CppClass *k, const char *name, wc2 *out) {
+    FieldInfo *f = cls_field(k, name);
+    if (!f || !obj) return 0;
+    wc2 v = {0, 0};
+    if (G_TRY) { A.field_get_value(obj, f, &v); g_guard = 0; }
+    else { g_guard = 0; return 0; }
+    *out = v;
+    return 1;
+}
+
+static char g_cities_json[8192];
+static size_t g_cities_len = 0;
+static int g_cities_n = 0, g_imp_found = 0;
+static char g_units_json[16384];
+static size_t g_units_len = 0;
+static int g_units_n = 0;
+
+static void scan_map(void *gs, int *army, int *production) {
+    memset(army, 0, 256 * sizeof(int));
+    memset(production, 0, 256 * sizeof(int));
+    g_cities_len = 0; g_cities_n = 0; g_imp_found = 0; g_cities_json[0] = 0;
+    g_units_len = 0; g_units_n = 0; g_units_json[0] = 0;
+    if (!g_mapdata_cls || !g_tiledata_cls) return;
+    void *map = f_ptr(gs, g_gamestate_cls, "<Map>k__BackingField");
+    if (!ptr_ok(map)) return;
+    void *tiles = f_ptr(map, g_mapdata_cls, "tiles");
+    if (!ptr_ok(tiles)) return;
+    size_t n = w_array_len(tiles);
+    if (n == 0 || n > 4096) return;
+    for (size_t i = 0; i < n; ++i) {
+        void *tile = arr_at(tiles, (int)i);
+        if (!ptr_ok(tile)) continue;
+        uint8_t tile_owner = 0xFF;
+        f_u8(tile, g_tiledata_cls, "owner", &tile_owner);
+        if (g_unitstate_cls) {
+            void *unit = f_ptr(tile, g_tiledata_cls, "<unit>k__BackingField");
+            if (ptr_ok(unit)) {
+                uint8_t own = 0xFF;
+                if (f_u8(unit, g_unitstate_cls, "owner", &own) && own < 255) army[own]++;
+                /* список юнитов: [id,owner,health,type] — для дельт урона */
+                if (g_units_n < 256 && g_units_len + 48 < sizeof(g_units_json)) {
+                    uint32_t uid = 0; uint16_t hp = 0; int32_t utype = -1;
+                    f_u32(unit, g_unitstate_cls, "id", &uid);
+                    f_u16(unit, g_unitstate_cls, "health", &hp);
+                    f_i32(unit, g_unitstate_cls, "type", &utype);
+                    g_units_len += (size_t)snprintf(g_units_json + g_units_len,
+                                                    sizeof(g_units_json) - g_units_len,
+                                                    "%s[%u,%u,%u,%d]",
+                                                    g_units_n ? "," : "", uid,
+                                                    (unsigned)own, (unsigned)hp, (int)utype);
+                    g_units_n++;
+                }
+            }
+        }
+        if (g_impstate_cls) {
+            void *imp = f_ptr(tile, g_tiledata_cls, "improvement");
+            if (!ptr_ok(imp)) continue;
+            g_imp_found++;
+            uint8_t own = 0xFF;
+            uint16_t prod = 0, level = 0;
+            int32_t type = -1;
+            f_u8(imp, g_impstate_cls, "owner", &own);
+            f_u16(imp, g_impstate_cls, "production", &prod);
+            f_u16(imp, g_impstate_cls, "level", &level);
+            f_i32(imp, g_impstate_cls, "type", &type);
+            wc2 c = {0, 0};
+            f_wc(tile, g_tiledata_cls, "coordinates", &c);
+            /* владелец города = владелец тайла (ImprovementState.owner не надёжен) */
+            uint8_t eff = tile_owner < 255 ? tile_owner : own;
+            if (eff < 255 && prod) production[eff] += prod;
+            /* список улучшений: [x,y,tile_owner,imp_owner,type,level,production] */
+            if (g_cities_n < 96 && g_cities_len + 64 < sizeof(g_cities_json)) {
+                g_cities_len += (size_t)snprintf(g_cities_json + g_cities_len,
+                                                 sizeof(g_cities_json) - g_cities_len,
+                                                 "%s[%d,%d,%u,%u,%d,%u,%u]",
+                                                 g_cities_n ? "," : "", c.x, c.y,
+                                                 (unsigned)tile_owner, (unsigned)own, type,
+                                                 (unsigned)level, (unsigned)prod);
+                g_cities_n++;
+            }
+        }
+    }
+}
+
+/* События из ActionStack: курсор помнит, сколько уже снято; на снимок хода
+ * выгружается дельта. Маркер turn_start (StartTurnAction) позволяет импортёру
+ * однозначно отнести события к ходу. Вложенные subActions обходятся рекурсивно. */
+static int32_t g_action_cursor = 0;
+static void *g_events_gs = NULL;
+static char g_events[32768];
+static size_t g_events_len = 0;
+static int g_events_n = 0, g_events_trunc = 0;
+static int g_commands_done = 0;
+
+static void ev(const char *fmt, ...) {
+    if (g_events_trunc) return;
+    if (g_events_len + 320 >= sizeof(g_events)) { g_events_trunc = 1; return; }
+    if (g_events_n) g_events[g_events_len++] = ',';
+    va_list ap;
+    va_start(ap, fmt);
+    int w = vsnprintf(g_events + g_events_len, sizeof(g_events) - g_events_len, fmt, ap);
+    va_end(ap);
+    if (w < 0 || (size_t)w >= sizeof(g_events) - g_events_len) { g_events_trunc = 1; return; }
+    g_events_len += (size_t)w;
+    g_events_n++;
+}
+
+static void emit_action(void *act, int depth) {
+    if (!ptr_ok(act) || depth > 3 || g_events_trunc) return;
+    Il2CppClass *k = w_obj_class(act);
+    const char *cn = (k && A.class_get_name(k)) ? A.class_get_name(k) : NULL;
+    if (!cn) return;
+
+    if (!strcmp(cn, "StartTurnAction")) {
+        ev("{\"t\":\"turn_start\"}");
+    } else if (!g_actionbase_cls) {
+        return;
+    } else {
+        uint8_t pid = 0;
+        f_u8(act, g_actionbase_cls, "<PlayerId>k__BackingField", &pid);
+        int32_t v1 = 0, v2 = 0;
+        uint8_t old = 0;
+        if (!strcmp(cn, "CaptureCityAction")) {
+            f_u8(act, k, "<OldOwnerId>k__BackingField", &old);
+            f_i32(act, k, "<Score>k__BackingField", &v1);
+            ev("{\"t\":\"capture\",\"p\":%u,\"old\":%u,\"score\":%d}",
+               (unsigned)pid, (unsigned)old, v1);
+        } else if (!strcmp(cn, "AttackAction")) {
+            f_i32(act, k, "<Damage>k__BackingField", &v1);
+            ev("{\"t\":\"attack\",\"p\":%u,\"dmg\":%d}", (unsigned)pid, v1);
+        } else if (!strcmp(cn, "IncreaseCurrencyAction")) {
+            f_i32(act, k, "<Amount>k__BackingField", &v1);
+            ev("{\"t\":\"income\",\"p\":%u,\"amt\":%d}", (unsigned)pid, v1);
+        } else if (!strcmp(cn, "TrainAction")) {
+            f_i32(act, k, "<Cost>k__BackingField", &v1);
+            f_i32(act, k, "<Type>k__BackingField", &v2);
+            ev("{\"t\":\"train\",\"p\":%u,\"cost\":%d,\"utype\":%d}",
+               (unsigned)pid, v1, v2);
+        } else if (!strcmp(cn, "ResearchAction")) {
+            f_i32(act, k, "<Cost>k__BackingField", &v1);
+            f_i32(act, k, "<Type>k__BackingField", &v2);
+            ev("{\"t\":\"research\",\"p\":%u,\"cost\":%d,\"ttype\":%d}",
+               (unsigned)pid, v1, v2);
+        } else if (!strcmp(cn, "UpgradeAction")) {
+            f_i32(act, k, "<Cost>k__BackingField", &v1);
+            ev("{\"t\":\"upgrade\",\"p\":%u,\"cost\":%d}", (unsigned)pid, v1);
+        } else if (!strcmp(cn, "KillUnitAction")) {
+            ev("{\"t\":\"kill\",\"p\":%u}", (unsigned)pid);
+        }
+    }
+
+    void *subs = g_actionbase_cls ? f_ptr(act, g_actionbase_cls, "subActions") : NULL;
+    int32_t n = list_size(subs);
+    void *arr = list_items(subs);
+    if (ptr_ok(arr) && n > 0 && n <= 256)
+        for (int32_t i = 0; i < n; ++i) emit_action(arr_at(arr, i), depth + 1);
+}
+
+/* Добавить новые события из ActionStack в накопитель (вызывается на КАЖДОМ
+ * опросе: стек — живая очередь анимаций, действия из него изымаются, поэтому
+ * снимать дельту нужно часто, а не только в момент смены хода). */
+static void collect_events(void *gs) {
+    if (gs != g_events_gs) { g_action_cursor = 0; g_events_gs = gs; g_commands_done = 0; }
+    void *stack = f_ptr(gs, g_gamestate_cls, "<ActionStack>k__BackingField");
+    int32_t size = list_size(stack);
+    if (size <= 0) return;
+    if (size < g_action_cursor) g_action_cursor = 0; /* очередь сбросилась */
+    void *arr = list_items(stack);
+    if (!ptr_ok(arr)) { g_action_cursor = size; return; }
+    int budget = 4096;
+    for (int32_t i = g_action_cursor; i < size && budget-- > 0; ++i)
+        emit_action(arr_at(arr, i), 0);
+    g_action_cursor = size;
+}
+
+static void events_reset(void) {
+    g_events_len = 0; g_events_n = 0; g_events_trunc = 0; g_events[0] = 0;
+}
+
+/* Диагностика targetGameState: гипотеза — его ActionStack хранит ПОЛНЫЙ лог
+ * действий матча (вычисляется при загрузке реплея), а currentGameState —
+ * лишь очередь анимаций. Пишем размеры и гистограмму классов в dump.log. */
+static void target_diag(void) {
+    static int last_an = -1, last_cn = -1;
+    if (!ptr_ok(g_client) || !g_client_cls) return;
+    void *tgt = f_ptr(g_client, g_client_cls, "targetGameState");
+    if (!ptr_ok(tgt) || !class_is(tgt, g_gamestate_cls)) return;
+    int32_t cur_cmd = -1;
+    f_i32(g_client, g_client_cls, "targetGameStateCurrentCommand", &cur_cmd);
+    void *astack = f_ptr(tgt, g_gamestate_cls, "<ActionStack>k__BackingField");
+    void *cstack = f_ptr(tgt, g_gamestate_cls, "<CommandStack>k__BackingField");
+    int32_t an = list_size(astack), cn = list_size(cstack);
+    logf_("target: cur_cmd=%d actions=%d commands=%d", cur_cmd, an, cn);
+    if (an == last_an && cn == last_cn) return;
+    last_an = an; last_cn = cn;
+
+    struct { const char *name; int count; } hist[64];
+    int nh = 0;
+    void *arr = list_items(astack);
+    if (ptr_ok(arr) && an > 0 && an <= 8192) {
+        for (int32_t i = 0; i < an; ++i) {
+            void *act = arr_at(arr, i);
+            if (!ptr_ok(act)) continue;
+            Il2CppClass *k = w_obj_class(act);
+            const char *nm = (k && A.class_get_name(k)) ? A.class_get_name(k) : "?";
+            int j = 0;
+            for (; j < nh; ++j) if (!strcmp(hist[j].name, nm)) break;
+            if (j < nh) hist[j].count++;
+            else if (nh < 64) { hist[nh].name = nm; hist[nh].count = 1; nh++; }
+        }
+    }
+    for (int j = 0; j < nh; ++j) logf_("  target.action %-30s x%d", hist[j].name, hist[j].count);
+    nh = 0;
+    arr = list_items(cstack);
+    if (ptr_ok(arr) && cn > 0 && cn <= 8192) {
+        for (int32_t i = 0; i < cn; ++i) {
+            void *cmd = arr_at(arr, i);
+            if (!ptr_ok(cmd)) continue;
+            Il2CppClass *k = w_obj_class(cmd);
+            const char *nm = (k && A.class_get_name(k)) ? A.class_get_name(k) : "?";
+            int j = 0;
+            for (; j < nh; ++j) if (!strcmp(hist[j].name, nm)) break;
+            if (j < nh) hist[j].count++;
+            else if (nh < 64) { hist[nh].name = nm; hist[nh].count = 1; nh++; }
+        }
+    }
+    for (int j = 0; j < nh; ++j) logf_("  target.command %-30s x%d", hist[j].name, hist[j].count);
+}
+
+/* Одноразовая выгрузка полного журнала команд матча из targetGameState.
+ * Команды — детерминированный источник: захваты (CaptureCommand), траты
+ * (Train/Research/Build), границы ходов (EndTurnCommand), атаки (AttackCommand).
+ * Файл commands.json рядом со снимками. */
+static void dump_commands(void) {
+    if (g_commands_done) return;
+    if (!ptr_ok(g_client) || !g_client_cls) return;
+    void *tgt = f_ptr(g_client, g_client_cls, "targetGameState");
+    if (!ptr_ok(tgt) || !class_is(tgt, g_gamestate_cls)) return;
+    void *cstack = f_ptr(tgt, g_gamestate_cls, "<CommandStack>k__BackingField");
+    int32_t cn = list_size(cstack);
+    void *arr = list_items(cstack);
+    if (!ptr_ok(arr) || cn <= 0 || cn > 8192) return;
+    Il2CppClass *cmdbase = find_class_pref("CommandBase");
+    char path[1300];
+    snprintf(path, sizeof(path), "%s/commands.json", g_outdir);
+    FILE *f = fopen(path, "w");
+    if (!f) return;
+    fprintf(f, "{\"v\": 1, \"count\": %d, \"commands\": [", cn);
+    int wrote = 0;
+    for (int32_t i = 0; i < cn; ++i) {
+        void *cmd = arr_at(arr, i);
+        if (!ptr_ok(cmd)) continue;
+        Il2CppClass *k = w_obj_class(cmd);
+        const char *nm = (k && A.class_get_name(k)) ? A.class_get_name(k) : "?";
+        uint8_t pid = 0;
+        if (cmdbase) f_u8(cmd, cmdbase, "<PlayerId>k__BackingField", &pid);
+        int32_t type = -1;
+        f_i32(cmd, k, "<Type>k__BackingField", &type); /* есть у Train/Build/Research/Upgrade */
+        fprintf(f, "%s{\"i\": %d, \"t\": \"%s\", \"p\": %u, \"type\": %d}",
+                wrote ? ", " : "", (int)i, nm, (unsigned)pid, (int)type);
+        wrote++;
+    }
+    fprintf(f, "]}\n");
+    fclose(f);
+    g_commands_done = 1;
+    logf_("commands.json записан: %d команд", wrote);
+}
+
+/* Полный снимок: игроки (+армия, +производство городов) и события хода. */
+static int build_snapshot(void *gs, int turn) {
     void *players = f_ptr(gs, g_gamestate_cls, "<PlayerStates>k__BackingField");
-    if (!ptr_ok(players)) { *turn_out = turn; return 0; }
+    if (!ptr_ok(players)) return 0;
     void *arr = list_items(players);
     int32_t n = list_size(players);
-    if (!ptr_ok(arr) || n < 0 || n > 32) { *turn_out = turn; return 0; }
+    if (!ptr_ok(arr) || n < 0 || n > 32) return 0;
+
+    int army[256], production[256];
+    scan_map(gs, army, production);
 
     size_t o = 0;
-    o += snprintf(g_turn_json + o, sizeof(g_turn_json) - o, "{%s", "");
-    char tmp[256];
-    snprintf(tmp, sizeof(tmp), "\"turn\": %d, \"players\": [", turn);
-    o += snprintf(g_turn_json + o, sizeof(g_turn_json) - o, "%s", tmp);
+    o += (size_t)snprintf(g_turn_json + o, sizeof(g_turn_json) - o,
+                          "{\"v\": 2, \"turn\": %d, \"actions_total\": %d, \"players\": [",
+                          turn, (int)g_action_cursor);
 
     int wrote = 0;
     for (int i = 0; i < n; ++i) {
@@ -941,19 +1263,32 @@ static int snapshot(void *gs, int *turn_out) {
         f_i32(ps, g_playstate_cls, "tribe", &tribe);
         int32_t wiped = 0;
         f_i32(ps, g_playstate_cls, "wipedAtCommandIndex", &wiped);
+        int a = id < 255 ? army[id] : 0;
+        int pr = id < 255 ? production[id] : 0;
 
-        o += snprintf(g_turn_json + o, sizeof(g_turn_json) - o,
-                      "%s{\"id\": %u, \"name\": \"%s\", \"tribe\": %d, \"score\": %u, "
-                      "\"end_score\": %u, \"stars\": %d, \"cities\": %d, \"kills\": %u, "
-                      "\"casualties\": %u, \"resigned_turn\": %d, \"wiped\": %s}",
-                      wrote ? ", " : "", (unsigned)id, name, tribe, score, endscore, stars,
-                      cities, kills, cas, resigned, wiped >= 0 ? "true" : "false");
+        if (o + 512 >= sizeof(g_turn_json)) break;
+        o += (size_t)snprintf(g_turn_json + o, sizeof(g_turn_json) - o,
+                              "%s{\"id\": %u, \"name\": \"%s\", \"tribe\": %d, \"score\": %u, "
+                              "\"end_score\": %u, \"stars\": %d, \"cities\": %d, \"kills\": %u, "
+                              "\"casualties\": %u, \"resigned_turn\": %d, \"wiped\": %s, "
+                              "\"army\": %d, \"production\": %d}",
+                              wrote ? ", " : "", (unsigned)id, name, tribe, score, endscore, stars,
+                              cities, kills, cas, resigned, wiped >= 0 ? "true" : "false", a, pr);
         wrote++;
-        logf_("  ход %d: игрок %u «%s» племя=%d счёт=%u звёзды=%d города=%d убийства=%u потери=%u",
-              turn, (unsigned)id, name, tribe, score, stars, cities, kills, cas);
+        logf_("  ход %d: игрок %u «%s» племя=%d счёт=%u звёзды=%d города=%d убийства=%u "
+              "потери=%u армия=%d производство=%d",
+              turn, (unsigned)id, name, tribe, score, stars, cities, kills, cas, a, pr);
     }
-    snprintf(g_turn_json + o, sizeof(g_turn_json) - o, "]}\n");
-    *turn_out = turn;
+    if (o + g_events_len + g_cities_len + g_units_len + 192 >= sizeof(g_turn_json)) {
+        /* события не влезают в буфер — фиксируем усечение, снимок остаётся валидным */
+        g_events[0] = 0;
+        g_events_len = 0;
+        g_events_trunc = 1;
+    }
+    snprintf(g_turn_json + o, sizeof(g_turn_json) - o,
+             "], \"cities\": [%s], \"units\": [%s], \"imp_found\": %d, \"events\": [%s%s]}\n",
+             g_cities_json, g_units_json, g_imp_found, g_events,
+             g_events_trunc ? ",{\"t\":\"truncated\"}" : "");
     return wrote > 0;
 }
 
@@ -1030,9 +1365,17 @@ static void run_dump(void) {
 
     g_gamestate_cls = find_class_all("GameState");
     g_playstate_cls = find_class_all("PlayerState");
+    g_mapdata_cls = find_class_pref("MapData");
+    g_tiledata_cls = find_class_pref("TileData");
+    g_unitstate_cls = find_class_pref("UnitState");
+    g_impstate_cls = find_class_pref("ImprovementState");
+    g_actionbase_cls = find_class_pref("ActionBase");
     Il2CppClass *gm_cls = find_class_all("GameManager");
     logf_("классы: GameState=%p PlayerState=%p GameManager=%p", (void *)g_gamestate_cls,
           (void *)g_playstate_cls, (void *)gm_cls);
+    logf_("классы v2: MapData=%p TileData=%p UnitState=%p ImprovementState=%p ActionBase=%p",
+          (void *)g_mapdata_cls, (void *)g_tiledata_cls, (void *)g_unitstate_cls,
+          (void *)g_impstate_cls, (void *)g_actionbase_cls);
     if (!g_gamestate_cls || !g_playstate_cls) return;
 
     /* ищем GameState: сначала статические поля, потом обход от GameManager.instance */
@@ -1100,13 +1443,18 @@ static void run_dump(void) {
                 continue;
             }
             if (g_live_noted) { logf_("режим реплея — снимки включены"); g_live_noted = 0; }
+            /* события собираем на каждом опросе: ActionStack — живая очередь,
+             * действия из неё изымаются по мере проигрывания анимаций */
+            collect_events(gs);
+            dump_commands();
+            {
+                static int diag_tick = 0;
+                if (++diag_tick % 10 == 0) target_diag();
+            }
             int turn = 0;
-            if (snapshot(gs, &turn)) {
-                write_snapshot(turn, 0);
-                char lp[1200];
-                snprintf(lp, sizeof(lp), "%s/latest.json", g_outdir);
-                FILE *lf = fopen(lp, "w");
-                if (lf) { fprintf(lf, "%s", g_turn_json); fclose(lf); }
+            /* тяжёлая часть (карта, снимок) — только в момент смены хода */
+            if (snapshot(gs, &turn) && turn != g_last_turn) {
+                if (build_snapshot(gs, turn)) { write_snapshot(turn, 1); events_reset(); }
             }
         }
         usleep((useconds_t)interval * 1000);

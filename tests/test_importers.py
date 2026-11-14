@@ -143,3 +143,83 @@ def test_tribe_name_fallback():
     assert shim.tribe_name(16) == "Polaris"
     assert shim.tribe_name(99) == "Tribe99"
     assert shim.tribe_name(None) == ""
+
+
+# ---------- снимки v2 (0.5.x): армия, доход, захваты ----------
+
+V2_INBOX = Path(__file__).parent / "fixtures" / "shim-v2-inbox"
+
+
+def test_v2_army_and_income():
+    match = shim.match_from_inbox(V2_INBOX)
+    kof = {r.turn: r for r in match.records_for("KOF")}
+    goy = {r.turn: r for r in match.records_for("Goylem")}
+    assert kof[12].army == 15 and goy[12].army == 9
+    assert kof[12].income == 19 and goy[12].income == 7
+    # на первом ходе у каждого по одному воину и разведчику, доход столицы 1
+    assert kof[1].army == 2 and goy[1].army == 2
+    assert kof[1].income == 1 and goy[1].income == 1
+
+
+def test_v2_captured_from_city_diff():
+    match = shim.match_from_inbox(V2_INBOX)
+    caps = {(r.turn, r.player): r.captured for r in match.records if r.captured}
+    assert caps == {(3, "KOF"): 1, (5, "Goylem"): 1, (6, "KOF"): 2,
+                    (10, "KOF"): 1, (10, "Goylem"): 1, (11, "KOF"): 2}
+    assert all(r.lost_cities == 0 for r in match.records)
+    # сверка с журналом команд: CaptureCommand ровно столько же
+    cmds = json.loads((V2_INBOX / "commands.json").read_text(encoding="utf-8"))
+    n_cmd = sum(1 for c in cmds["commands"] if c["t"] == "CaptureCommand")
+    assert n_cmd == sum(r.captured for r in match.records) == 8
+
+
+def test_v2_cities_counter_consistency():
+    """Счётчик городов согласован с диффом: прирост ≥ захватов − потерь."""
+    match = shim.match_from_inbox(V2_INBOX)
+    for name in ("KOF", "Goylem"):
+        recs = match.records_for(name)
+        for prev, cur in zip(recs, recs[1:]):
+            assert cur.cities - prev.cities >= cur.captured - cur.lost_cities
+
+
+def test_v2_filled_and_validation():
+    match = shim.match_from_inbox(V2_INBOX)
+    expected = {"score", "cities", "kills", "losses",
+                "army", "income", "captured", "lost_cities"}
+    for r in match.records:
+        assert r.filled == expected
+    rep = validate_match(match)
+    assert not rep.has_errors
+    assert rep.completeness["KOF"] > 0.8  # 8 из 9 метрик
+
+
+def test_v2_income_explains_star_dynamics():
+    """Доход городов согласован с динамикой звёзд: Δstars ≤ income (трата+награда).
+
+    Точное равенство не гарантировано: звёзды ещё дают награды руин/городов,
+    а траты уводят баланс в минус. Проверяем мягкую границу сверху.
+    """
+    snaps = {int(s["turn"]): s for s in shim.load_snapshots(V2_INBOX)}
+    match = shim.match_from_inbox(V2_INBOX)
+    for name, pid in (("KOF", 1), ("Goylem", 2)):
+        for r in match.records_for(name):
+            if r.turn == 0:
+                continue
+            prev_p = next(p for p in snaps[r.turn - 1]["players"] if p["id"] == pid)
+            cur_p = next(p for p in snaps[r.turn]["players"] if p["id"] == pid)
+            delta = cur_p["stars"] - prev_p["stars"]
+            assert delta <= r.income + 10  # награды не безграничны
+
+
+def test_v2_full_pipeline_to_report(tmp_path):
+    from polytopia_analyzer.report import build_report
+    from polytopia_analyzer.storage import load_match, save_match
+
+    match = shim.match_from_inbox(V2_INBOX, title="Timeless Battles v2")
+    rep = validate_match(match)
+    assert not rep.has_errors
+    out = tmp_path / "v2.json"
+    save_match(match, out)
+    html = build_report(load_match(out), plotly_js=None)
+    assert "Timeless Battles v2" in html
+    assert "4485" in html and "2185" in html

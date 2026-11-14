@@ -212,7 +212,16 @@ static int resolve_all(void *h) {
 static const char *TARGETS[] = {"GameState", "GameManager", "Player", "City", "Unit",
                                 "Tribe", "MapData", "GameData", "GameStateData",
                                 "PlayerState", "CityState", "UnitState", "Board",
-                                "MatchState", "ReplayData"};
+                                "MatchState", "ReplayData",
+                                /* разведка 0.5.x: где живут юниты/города/события */
+                                "TileData", "ActionBase", "ActionType", "CommandBase",
+                                "CommandType", "AttackAction", "KillUnitAction",
+                                "CaptureCityAction", "IncreaseCurrencyAction",
+                                "TrainAction", "StartTurnAction", "GameLogicData",
+                                "UnitData", "ImprovementData",
+                                "BuildAction", "ResearchAction", "UpgradeAction",
+                                "BuildRoadAction", "CityRewardAction", "WorldCoordinates",
+                                "ImprovementState", "TrainCommand", "BuildCommand"};
 #define NTARGETS (sizeof(TARGETS) / sizeof(TARGETS[0]))
 
 /* Поиск класса по имени перебором: il2cpp_class_from_name не находит часть
