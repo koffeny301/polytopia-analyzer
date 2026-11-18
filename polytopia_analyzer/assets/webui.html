@@ -350,7 +350,7 @@ footer { text-align:center; color:var(--muted); font-size:11px; padding:14px; }
     <h3>Новый матч</h3>
     <label class="f"><span>Название</span><input type="text" id="np-title" placeholder="Матч с друзьями"></label>
     <label class="f"><span>Игроки (через запятую)</span><input type="text" id="np-players" value="Игрок1,Игрок2"></label>
-    <label class="f"><span>Число ходов</span><input type="number" id="np-turns" value="30" min="1" max="500"></label>
+    <label class="f"><span>Число ходов (пусто — расти автоматически)</span><input type="number" id="np-turns" value="" placeholder="авто" min="1" max="500"></label>
     <div class="modal-actions">
       <button id="np-cancel">Отмена</button>
       <button id="np-create" class="gold">Создать</button>
@@ -528,7 +528,9 @@ function setMatch(dict, turnsOverride) {
     state.recMap.set(key(t.turn, t.player), rec);
   }
   const maxTurn = (m.turns || []).reduce((a, t) => Math.max(a, t.turn || 0), 0);
-  state.turnsCount = turnsOverride || Math.max(m.meta.turn_limit || 0, maxTurn, 10);
+  // динамическое число ходов: ровно столько, сколько есть в данных (минимум 1);
+  // таблица растёт автоматически при заполнении последнего хода (growTurns)
+  state.turnsCount = turnsOverride || Math.max(maxTurn, 1);
   renderAll();
 }
 
@@ -707,9 +709,19 @@ function wizFocusFirst() {
 
 function wizGoTurn(delta) {
   const next = state.wizardTurn + delta;
-  if (next < 1 || next > state.turnsCount) {
-    toast(next < 1 ? "Это первый ход" : "Это последний ход");
-    return;
+  if (next < 1) { toast("Это первый ход"); return; }
+  if (next > state.turnsCount) {
+    // динамическое число ходов: следующий ход открывается, если текущий заполнен
+    const t = state.wizardTurn;
+    const filled = [...state.recMap.entries()].some(([k, rec]) =>
+      splitKey(k)[0] === t && METRICS.some(m => String(rec[m] ?? "").trim() !== ""));
+    if (delta > 0 && filled) {
+      state.turnsCount = next;
+      $("g-turns").value = state.turnsCount;
+    } else {
+      toast("Это последний ход");
+      return;
+    }
   }
   state.wizardTurn = next;
   renderWizard();
@@ -727,12 +739,41 @@ function updateWizProgress() {
 function onMetricInput(inp) {
   const k = inp.dataset.key, metric = inp.dataset.metric;
   let rec = state.recMap.get(k);
+  const hadData = rec ? METRICS.some(m => String(rec[m] ?? "").trim() !== "") : false;
   if (!rec) { rec = {}; state.recMap.set(k, rec); }
   rec[metric] = inp.value;
+  const nowFilled = METRICS.some(m => String(rec[m] ?? "").trim() !== "");
   const tr = inp.closest("tr");
-  if (tr) tr.classList.toggle("filled", METRICS.some(m => String(rec[m] ?? "").trim() !== ""));
+  if (tr) tr.classList.toggle("filled", nowFilled);
   markDirty();
+  // динамическое число ходов: первое заполнение последнего хода добавляет следующий
+  if (nowFilled && !hadData && splitKey(k)[0] === state.turnsCount) growTurns(inp);
   scheduleValidation();
+}
+
+function growTurns(activeInp) {
+  state.turnsCount++;
+  $("g-turns").value = state.turnsCount;
+  if (state.view === "wizard") {
+    updateWizProgress();
+    const prog = document.querySelector("#wizard .wiz-progress");
+    if (prog) prog.textContent = `Ход ${state.wizardTurn}/${state.turnsCount}`;
+    return;
+  }
+  // перерисовываем таблицу, сохраняя фокус и курсор в той же ячейке
+  const key = activeInp && activeInp.dataset ? activeInp.dataset.key : null;
+  const metric = activeInp && activeInp.dataset ? activeInp.dataset.metric : null;
+  let pos = null;
+  try { pos = activeInp ? [activeInp.selectionStart, activeInp.selectionEnd] : null; } catch (e) {}
+  renderGrid();
+  if (key && metric) {
+    const ni = document.querySelector(
+      `#grid input[data-key="${CSS.escape(key)}"][data-metric="${metric}"]`);
+    if (ni) {
+      ni.focus();
+      if (pos && pos[0] != null) { try { ni.setSelectionRange(pos[0], pos[1]); } catch (e) {} }
+    }
+  }
 }
 
 function fmtDate(ts) {
@@ -1236,7 +1277,7 @@ function wireEvents() {
   $("btn-new").onclick = () => {
     $("np-title").value = "";
     $("np-players").value = "Игрок1,Игрок2";
-    $("np-turns").value = 30;
+    $("np-turns").value = "";
     $("modal-backdrop").classList.remove("hidden");
   };
   const closeModal = () => $("modal-backdrop").classList.add("hidden");
@@ -1246,7 +1287,10 @@ function wireEvents() {
     if (state.dirty && !confirm("Несохранённые изменения будут потеряны. Создать новый матч?")) return;
     const names = val("np-players").split(",").map(s => s.trim()).filter(Boolean);
     if (!names.length) return toast("Введите имена игроков через запятую", true);
-    const turns = Math.max(1, Math.min(500, parseInt(val("np-turns"), 10) || 30));
+    const parsedTurns = parseInt(val("np-turns"), 10);
+    const turns = Number.isNaN(parsedTurns)
+      ? undefined                                   // динамически: растёт при вводе
+      : Math.max(1, Math.min(500, parsedTurns));
     setMatch({
       meta: { title: val("np-title").trim(), date: new Date().toISOString().slice(0, 10) },
       players: names.map(n => ({ name: n })),
@@ -1444,7 +1488,7 @@ function init() {
     meta: { date: new Date().toISOString().slice(0, 10) },
     players: [{ name: "Игрок1" }, { name: "Игрок2" }],
     turns: [],
-  }, 30);
+  });
   state.dirty = false;
   renderAll();
   loadMatches();

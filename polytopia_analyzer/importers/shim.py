@@ -255,7 +255,7 @@ def match_from_snapshots(snapshots: Iterable[dict], *, title: str = "",
         mode=mode,
         map=map_name,
         link=link,
-        turn_limit=max(int(s["turn"]) for s in snaps) + 1,
+        turn_limit=max(int(s["turn"]) for s in snaps),
         notes=(notes or default_notes),
         source="shim",
     )

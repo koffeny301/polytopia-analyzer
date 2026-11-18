@@ -706,7 +706,10 @@ def match_from_snapshots(snapshots, events: Optional[dict] = None, *,
             target.filled = (target.filled or set()) | {"captured", "lost_cities"}
 
     if turn_limit is None:
-        turn_limit = int(last.get("turn_limit") or 0) or None
+        # динамически: последний фактический ход с данными; для пустого сейва
+        # (ход 0) — игровой лимит из заголовка
+        turn_limit = max((r.turn for r in records), default=0) \
+            or int(last.get("turn_limit") or 0) or None
     meta = MatchMeta(
         title=title or default_title,
         date=date or datetime.now().strftime("%Y-%m-%d"),

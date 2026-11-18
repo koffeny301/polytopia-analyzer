@@ -40,7 +40,7 @@ def test_meta_source_is_shim(inbox):
     assert match.meta.source == "shim"
     assert match.meta.title == "Timeless Battles"
     assert match.meta.link == "https://example/1"
-    assert match.meta.turn_limit == 13
+    assert match.meta.turn_limit == 12  # динамически: последний фактический ход
     assert "состоянии" in match.meta.notes
 
 
