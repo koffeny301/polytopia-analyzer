@@ -832,7 +832,7 @@ static void sweep(void) {
 static int snapshot(void *gs, int *turn_out);
 static int build_snapshot(void *gs, int turn);
 static void write_snapshot(int turn, int force);
-static void collect_events(void *gs);
+static void collect_events(void *gs, int turn);
 static void events_reset(void);
 
 /* печать полей указанных классов: POLYREAD_DUMP_FIELDS="ReplayInterface,Timeline" */
@@ -919,7 +919,7 @@ static void watch_tacts(void) {
                 int ok = snapshot(gs, &turn);
                 logf_("    GameState НАЙДЕН: %s, ход=%d, снимок=%d", where, turn, ok);
                 if (ok) {
-                    collect_events(gs);
+                    collect_events(gs, turn);
                     if (build_snapshot(gs, turn)) { write_snapshot(turn, 1); events_reset(); }
                 }
             } else {
@@ -1041,17 +1041,20 @@ static void scan_map(void *gs, int *army, int *production) {
             if (ptr_ok(unit)) {
                 uint8_t own = 0xFF;
                 if (f_u8(unit, g_unitstate_cls, "owner", &own) && own < 255) army[own]++;
-                /* список юнитов: [id,owner,health,type] — для дельт урона */
-                if (g_units_n < 256 && g_units_len + 48 < sizeof(g_units_json)) {
+                /* список юнитов: [id,owner,health,type,x,y] — для дельт урона (M14) */
+                if (g_units_n < 256 && g_units_len + 64 < sizeof(g_units_json)) {
                     uint32_t uid = 0; uint16_t hp = 0; int32_t utype = -1;
                     f_u32(unit, g_unitstate_cls, "id", &uid);
                     f_u16(unit, g_unitstate_cls, "health", &hp);
                     f_i32(unit, g_unitstate_cls, "type", &utype);
+                    wc2 uc = {0, 0};
+                    f_wc(tile, g_tiledata_cls, "coordinates", &uc);
                     g_units_len += (size_t)snprintf(g_units_json + g_units_len,
                                                     sizeof(g_units_json) - g_units_len,
-                                                    "%s[%u,%u,%u,%d]",
+                                                    "%s[%u,%u,%u,%d,%d,%d]",
                                                     g_units_n ? "," : "", uid,
-                                                    (unsigned)own, (unsigned)hp, (int)utype);
+                                                    (unsigned)own, (unsigned)hp, (int)utype,
+                                                    uc.x, uc.y);
                     g_units_n++;
                 }
             }
@@ -1088,13 +1091,81 @@ static void scan_map(void *gs, int *army, int *production) {
 
 /* События из ActionStack: курсор помнит, сколько уже снято; на снимок хода
  * выгружается дельта. Маркер turn_start (StartTurnAction) позволяет импортёру
- * однозначно отнести события к ходу. Вложенные subActions обходятся рекурсивно. */
+ * однозначно отнести события к ходу. Вложенные subActions обходятся рекурсивно.
+ *
+ * Надёжный перехват (M14): ActionStack — живая очередь, элементы изымаются
+ * СЛЕВА, поэтому индексный курсор терял до 56% действий (сверка с цензом
+ * AttackCommand из commands.json). Теперь — полный скан очереди на каждом
+ * опросе + дедупликация по отпечатку (указатель + ключевые поля, кольцо).
+ * Каждое уникальное действие верхнего уровня также пишется в actions.json
+ * с номером хода в момент поимки (точный источник для урона: AttackAction
+ * несёт Damage/Origin/Target; targetGameState.ActionStack пуст — проверено). */
 static int32_t g_action_cursor = 0;
 static void *g_events_gs = NULL;
 static char g_events[32768];
 static size_t g_events_len = 0;
 static int g_events_n = 0, g_events_trunc = 0;
 static int g_commands_done = 0;
+
+#define SEEN_N 16384  /* степень двойки; слот с ptr==NULL свободен */
+typedef struct { void *ptr; uint8_t pid; int32_t a, b, c, d, e; } act_fp;
+static act_fp g_seen[SEEN_N];
+
+static unsigned seen_hash(const act_fp *f) {
+    uint64_t h = (uint64_t)(uintptr_t)f->ptr * 0x9E3779B97F4A7C15ull;
+    h ^= (uint64_t)(uint32_t)f->a * 0xC2B2AE3D27D4EB4Full;
+    h ^= ((uint64_t)(uint32_t)f->b << 20) ^ ((uint64_t)(uint32_t)f->c << 10)
+       ^ ((uint64_t)(uint32_t)f->d << 30) ^ ((uint64_t)(uint32_t)f->e << 40);
+    h ^= (uint64_t)f->pid << 56;
+    return (unsigned)((h ^ (h >> 29)) & (SEEN_N - 1));
+}
+
+/* возвращает 1, если действие уже учтено; иначе регистрирует отпечаток.
+ * Открытая адресация, до 8 проб; при переполнении кластера считаем новым
+ * (лучше редкий дубль в журнале, чем потерянное действие). */
+static int seen_check_put(const act_fp *fp) {
+    unsigned i = seen_hash(fp);
+    for (int probe_n = 0; probe_n < 8; ++probe_n, i = (i + 1) & (SEEN_N - 1)) {
+        act_fp *s = &g_seen[i];
+        if (!s->ptr) { *s = *fp; return 0; }
+        if (s->ptr == fp->ptr && s->pid == fp->pid && s->a == fp->a
+            && s->b == fp->b && s->c == fp->c && s->d == fp->d && s->e == fp->e)
+            return 1;
+    }
+    return 0;
+}
+static void seen_reset(void) { memset(g_seen, 0, sizeof(g_seen)); }
+
+/* полный журнал действий: накапливается в памяти, атомарно пишется в
+ * $OUTDIR/actions.json при каждом пополнении */
+static char g_acts[2 * 1024 * 1024];
+static size_t g_acts_len = 0;
+static int g_acts_n = 0, g_acts_dirty = 0, g_acts_trunc = 0;
+
+static void act_log(int i, const char *cls, int turn, unsigned pid, const char *extra, int depth) {
+    if (g_acts_trunc) return;
+    int w = snprintf(g_acts + g_acts_len, sizeof(g_acts) - g_acts_len,
+                     "%s{\"i\":%d,\"c\":\"%s\",\"turn\":%d,\"p\":%u,\"d\":%d%s}",
+                     g_acts_n ? "," : "", i, cls, turn, pid, depth, extra);
+    if (w < 0 || (size_t)w >= sizeof(g_acts) - g_acts_len) { g_acts_trunc = 1; return; }
+    g_acts_len += (size_t)w;
+    g_acts_n++;
+    g_acts_dirty = 1;
+}
+
+static void act_flush(void) {
+    if (!g_acts_dirty) return;
+    g_acts_dirty = 0;
+    char path[1300], tmp[1316];
+    snprintf(path, sizeof(path), "%s/actions.json", g_outdir);
+    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+    FILE *f = fopen(tmp, "w");
+    if (!f) return;
+    fprintf(f, "{\"v\":1,\"count\":%d,\"actions\":[%s%s]}\n", g_acts_n, g_acts,
+            g_acts_trunc ? ",{\"c\":\"truncated\"}" : "");
+    fclose(f);
+    rename(tmp, path);
+}
 
 static void ev(const char *fmt, ...) {
     if (g_events_trunc) return;
@@ -1109,72 +1180,117 @@ static void ev(const char *fmt, ...) {
     g_events_n++;
 }
 
-static void emit_action(void *act, int depth) {
-    if (!ptr_ok(act) || depth > 3 || g_events_trunc) return;
+static void emit_action(void *act, int depth, int turn) {
+    if (!ptr_ok(act) || depth > 3) return;
     Il2CppClass *k = w_obj_class(act);
     const char *cn = (k && A.class_get_name(k)) ? A.class_get_name(k) : NULL;
     if (!cn) return;
 
-    if (!strcmp(cn, "StartTurnAction")) {
-        ev("{\"t\":\"turn_start\"}");
-    } else if (!g_actionbase_cls) {
-        return;
-    } else {
-        uint8_t pid = 0;
-        f_u8(act, g_actionbase_cls, "<PlayerId>k__BackingField", &pid);
-        int32_t v1 = 0, v2 = 0;
-        uint8_t old = 0;
-        if (!strcmp(cn, "CaptureCityAction")) {
-            f_u8(act, k, "<OldOwnerId>k__BackingField", &old);
-            f_i32(act, k, "<Score>k__BackingField", &v1);
-            ev("{\"t\":\"capture\",\"p\":%u,\"old\":%u,\"score\":%d}",
-               (unsigned)pid, (unsigned)old, v1);
-        } else if (!strcmp(cn, "AttackAction")) {
-            f_i32(act, k, "<Damage>k__BackingField", &v1);
-            ev("{\"t\":\"attack\",\"p\":%u,\"dmg\":%d}", (unsigned)pid, v1);
-        } else if (!strcmp(cn, "IncreaseCurrencyAction")) {
-            f_i32(act, k, "<Amount>k__BackingField", &v1);
-            ev("{\"t\":\"income\",\"p\":%u,\"amt\":%d}", (unsigned)pid, v1);
-        } else if (!strcmp(cn, "TrainAction")) {
-            f_i32(act, k, "<Cost>k__BackingField", &v1);
-            f_i32(act, k, "<Type>k__BackingField", &v2);
-            ev("{\"t\":\"train\",\"p\":%u,\"cost\":%d,\"utype\":%d}",
-               (unsigned)pid, v1, v2);
-        } else if (!strcmp(cn, "ResearchAction")) {
-            f_i32(act, k, "<Cost>k__BackingField", &v1);
-            f_i32(act, k, "<Type>k__BackingField", &v2);
-            ev("{\"t\":\"research\",\"p\":%u,\"cost\":%d,\"ttype\":%d}",
-               (unsigned)pid, v1, v2);
-        } else if (!strcmp(cn, "UpgradeAction")) {
-            f_i32(act, k, "<Cost>k__BackingField", &v1);
-            ev("{\"t\":\"upgrade\",\"p\":%u,\"cost\":%d}", (unsigned)pid, v1);
-        } else if (!strcmp(cn, "KillUnitAction")) {
-            ev("{\"t\":\"kill\",\"p\":%u}", (unsigned)pid);
-        }
+    uint8_t pid = 0;
+    if (g_actionbase_cls) f_u8(act, g_actionbase_cls, "<PlayerId>k__BackingField", &pid);
+
+    act_fp fp;
+    memset(&fp, 0, sizeof(fp));
+    fp.ptr = act;
+    fp.pid = pid;
+    char extra[192]; extra[0] = 0;   /* поля для actions.json */
+    char evbuf[224]; evbuf[0] = 0;   /* событие для снимка (не у всех классов) */
+    int32_t v1 = 0, v2 = 0;
+    uint8_t old = 0;
+    wc2 org = {0, 0}, tgt = {0, 0};
+
+    if (!strcmp(cn, "AttackAction")) {
+        f_i32(act, k, "<Damage>k__BackingField", &v1);
+        f_wc(act, k, "<Origin>k__BackingField", &org);
+        f_wc(act, k, "<Target>k__BackingField", &tgt);
+        fp.a = v1; fp.b = org.x; fp.c = org.y; fp.d = tgt.x; fp.e = tgt.y;
+        snprintf(extra, sizeof(extra), ",\"dmg\":%d,\"ox\":%d,\"oy\":%d,\"tx\":%d,\"ty\":%d",
+                 v1, org.x, org.y, tgt.x, tgt.y);
+        snprintf(evbuf, sizeof(evbuf), "{\"t\":\"attack\",\"p\":%u,\"dmg\":%d}",
+                 (unsigned)pid, v1);
+    } else if (!strcmp(cn, "KillUnitAction")) {
+        f_wc(act, k, "<Coordinates>k__BackingField", &org);
+        fp.b = org.x; fp.c = org.y;
+        snprintf(extra, sizeof(extra), ",\"x\":%d,\"y\":%d", org.x, org.y);
+        snprintf(evbuf, sizeof(evbuf), "{\"t\":\"kill\",\"p\":%u,\"x\":%d,\"y\":%d}",
+                 (unsigned)pid, org.x, org.y);
+    } else if (!strcmp(cn, "CaptureCityAction")) {
+        f_u8(act, k, "<OldOwnerId>k__BackingField", &old);
+        f_i32(act, k, "<Score>k__BackingField", &v1);
+        fp.a = old; fp.b = v1;
+        snprintf(extra, sizeof(extra), ",\"old\":%u,\"score\":%d", (unsigned)old, v1);
+        snprintf(evbuf, sizeof(evbuf), "{\"t\":\"capture\",\"p\":%u,\"old\":%u,\"score\":%d}",
+                 (unsigned)pid, (unsigned)old, v1);
+    } else if (!strcmp(cn, "IncreaseCurrencyAction")) {
+        f_i32(act, k, "<Amount>k__BackingField", &v1);
+        fp.a = v1;
+        snprintf(extra, sizeof(extra), ",\"amt\":%d", v1);
+        snprintf(evbuf, sizeof(evbuf), "{\"t\":\"income\",\"p\":%u,\"amt\":%d}",
+                 (unsigned)pid, v1);
+    } else if (!strcmp(cn, "TrainAction")) {
+        f_i32(act, k, "<Cost>k__BackingField", &v1);
+        f_i32(act, k, "<Type>k__BackingField", &v2);
+        fp.a = v1; fp.b = v2;
+        snprintf(extra, sizeof(extra), ",\"cost\":%d,\"utype\":%d", v1, v2);
+        snprintf(evbuf, sizeof(evbuf), "{\"t\":\"train\",\"p\":%u,\"cost\":%d,\"utype\":%d}",
+                 (unsigned)pid, v1, v2);
+    } else if (!strcmp(cn, "ResearchAction")) {
+        f_i32(act, k, "<Cost>k__BackingField", &v1);
+        f_i32(act, k, "<Type>k__BackingField", &v2);
+        fp.a = v1; fp.b = v2;
+        snprintf(extra, sizeof(extra), ",\"cost\":%d,\"ttype\":%d", v1, v2);
+        snprintf(evbuf, sizeof(evbuf), "{\"t\":\"research\",\"p\":%u,\"cost\":%d,\"ttype\":%d}",
+                 (unsigned)pid, v1, v2);
+    } else if (!strcmp(cn, "UpgradeAction")) {
+        f_i32(act, k, "<Cost>k__BackingField", &v1);
+        fp.a = v1;
+        snprintf(extra, sizeof(extra), ",\"cost\":%d", v1);
+        snprintf(evbuf, sizeof(evbuf), "{\"t\":\"upgrade\",\"p\":%u,\"cost\":%d}",
+                 (unsigned)pid, v1);
+    } else if (!strcmp(cn, "StartTurnAction")) {
+        snprintf(evbuf, sizeof(evbuf), "{\"t\":\"turn_start\"}");
+    }
+    /* прочие классы: только журнал actions.json (без полей) */
+
+    /* уникальные действия учитываются на ВСЕХ уровнях вложенности: атаки и
+     * перемещения живут в subActions составных действий (EndCommandAction,
+     * RunDeferredAction и т.п.) — на верхнем уровне их почти не видно */
+    if (!seen_check_put(&fp)) {
+        g_action_cursor++;
+        act_log(g_action_cursor, cn, turn, (unsigned)pid, extra, depth);
+        if (evbuf[0]) ev("%s", evbuf);
     }
 
     void *subs = g_actionbase_cls ? f_ptr(act, g_actionbase_cls, "subActions") : NULL;
     int32_t n = list_size(subs);
     void *arr = list_items(subs);
     if (ptr_ok(arr) && n > 0 && n <= 256)
-        for (int32_t i = 0; i < n; ++i) emit_action(arr_at(arr, i), depth + 1);
+        for (int32_t i = 0; i < n; ++i) emit_action(arr_at(arr, i), depth + 1, turn);
 }
 
-/* Добавить новые события из ActionStack в накопитель (вызывается на КАЖДОМ
- * опросе: стек — живая очередь анимаций, действия из него изымаются, поэтому
- * снимать дельту нужно часто, а не только в момент смены хода). */
-static void collect_events(void *gs) {
-    if (gs != g_events_gs) { g_action_cursor = 0; g_events_gs = gs; g_commands_done = 0; }
+/* Полный скан ActionStack на каждом опросе (вызывается из главного цикла):
+ * очередь живая, элементы изымаются слева, поэтому курсор по индексу
+ * не годится — вместо него дедупликация по отпечатку в seen_check_put.
+ * turn — CurrentTurn на момент опроса: действия попадают в actions.json
+ * с точной привязкой к ходу. */
+static void collect_events(void *gs, int turn) {
+    if (gs != g_events_gs) {
+        g_events_gs = gs;
+        g_commands_done = 0;
+        g_action_cursor = 0;
+        seen_reset();
+        g_acts_len = 0; g_acts_n = 0; g_acts_trunc = 0; g_acts[0] = 0;
+        g_acts_dirty = 1;  /* записать пустой журнал новой партии */
+    }
     void *stack = f_ptr(gs, g_gamestate_cls, "<ActionStack>k__BackingField");
     int32_t size = list_size(stack);
-    if (size <= 0) return;
-    if (size < g_action_cursor) g_action_cursor = 0; /* очередь сбросилась */
+    if (size <= 0) { act_flush(); return; }
     void *arr = list_items(stack);
-    if (!ptr_ok(arr)) { g_action_cursor = size; return; }
-    int budget = 4096;
-    for (int32_t i = g_action_cursor; i < size && budget-- > 0; ++i)
-        emit_action(arr_at(arr, i), 0);
-    g_action_cursor = size;
+    if (!ptr_ok(arr)) { act_flush(); return; }
+    if (size > 512) size = 512;  /* защита от аномально большой очереди */
+    for (int32_t i = 0; i < size; ++i)
+        emit_action(arr_at(arr, i), 0, turn);
+    act_flush();
 }
 
 static void events_reset(void) {
@@ -1249,7 +1365,7 @@ static void dump_commands(void) {
     snprintf(path, sizeof(path), "%s/commands.json", g_outdir);
     FILE *f = fopen(path, "w");
     if (!f) return;
-    fprintf(f, "{\"v\": 1, \"count\": %d, \"commands\": [", cn);
+    fprintf(f, "{\"v\": 2, \"count\": %d, \"commands\": [", cn);
     int wrote = 0;
     for (int32_t i = 0; i < cn; ++i) {
         void *cmd = arr_at(arr, i);
@@ -1260,8 +1376,31 @@ static void dump_commands(void) {
         if (cmdbase) f_u8(cmd, cmdbase, "<PlayerId>k__BackingField", &pid);
         int32_t type = -1;
         f_i32(cmd, k, "<Type>k__BackingField", &type); /* есть у Train/Build/Research/Upgrade */
-        fprintf(f, "%s{\"i\": %d, \"t\": \"%s\", \"p\": %u, \"type\": %d}",
+        fprintf(f, "%s{\"i\": %d, \"t\": \"%s\", \"p\": %u, \"type\": %d",
                 wrote ? ", " : "", (int)i, nm, (unsigned)pid, (int)type);
+        /* M14: id юнитов и координаты — для детерминированной реконструкции
+         * урона (кто/кого/где атаковал, где лечился/расформирован/взорван) */
+        if (!strcmp(nm, "AttackCommand")) {
+            uint32_t uid = 0; wc2 org = {0,0}, tgt = {0,0};
+            f_u32(cmd, k, "<UnitId>k__BackingField", &uid);
+            f_wc(cmd, k, "<Origin>k__BackingField", &org);
+            f_wc(cmd, k, "<Target>k__BackingField", &tgt);
+            fprintf(f, ", \"uid\": %u, \"ox\": %d, \"oy\": %d, \"tx\": %d, \"ty\": %d",
+                    uid, org.x, org.y, tgt.x, tgt.y);
+        } else if (!strcmp(nm, "MoveCommand")) {
+            uint32_t uid = 0; wc2 fr = {0,0}, to = {0,0};
+            f_u32(cmd, k, "<UnitId>k__BackingField", &uid);
+            f_wc(cmd, k, "<From>k__BackingField", &fr);
+            f_wc(cmd, k, "<To>k__BackingField", &to);
+            fprintf(f, ", \"uid\": %u, \"fx\": %d, \"fy\": %d, \"tx\": %d, \"ty\": %d",
+                    uid, fr.x, fr.y, to.x, to.y);
+        } else if (!strcmp(nm, "RecoverCommand") || !strcmp(nm, "DisbandCommand")
+                || !strcmp(nm, "ExplodeCommand")) {
+            wc2 c = {0,0};
+            f_wc(cmd, k, "<Coordinates>k__BackingField", &c);
+            fprintf(f, ", \"x\": %d, \"y\": %d", c.x, c.y);
+        }
+        fprintf(f, "}");
         wrote++;
     }
     fprintf(f, "]}\n");
@@ -1339,10 +1478,11 @@ static int build_snapshot(void *gs, int turn) {
  * с тем, что HUD показывает для этого хода (проверено сверкой с OCR-эталоном:
  * первый же опрос нового хода даёт ровно те числа). latest.json обновляется
  * всегда, чтобы видеть текущее состояние.
- * Ход 0 — начальное состояние ДО проигрывания реплея, а не сыгранный ход:
- * снимок snapshot-000 не пишется (иначе в матче появляется лишний ход). */
+ * Снимок хода 0 (начальное состояние ДО проигрывания) пишется как БАЗА для
+ * дельт (HP юнитов, владельцы городов): импортёр не делает из него запись
+ * матча (issue #1), но без него теряются приросты первого хода. */
 static void write_snapshot(int turn, int force) {
-    if (turn < 1) return;
+    if (turn < 0) return;
     if (!force && turn == g_last_turn) return;
     g_last_turn = turn;
     char path[1300];
@@ -1489,18 +1629,19 @@ static void run_dump(void) {
                 continue;
             }
             if (g_live_noted) { logf_("режим реплея — снимки включены"); g_live_noted = 0; }
-            /* события собираем на каждом опросе: ActionStack — живая очередь,
-             * действия из неё изымаются по мере проигрывания анимаций */
-            collect_events(gs);
+            int turn = 0;
+            int have_turn = snapshot(gs, &turn);
+            /* события собираем на каждом опросе: ActionStack — живая очередь
+             * анимаций; полный скан + дедуп по отпечатку, ход — на момент поимки */
+            collect_events(gs, have_turn ? turn : 0);
             dump_commands();
             {
                 static int diag_tick = 0;
                 if (++diag_tick % 10 == 0) target_diag();
             }
-            int turn = 0;
             /* тяжёлая часть (карта, снимок) — только в момент смены хода;
-             * ход 0 (начальное состояние до проигрывания) не снимаем */
-            if (snapshot(gs, &turn) && turn >= 1 && turn != g_last_turn) {
+             * ход 0 пишем как базу для дельт (импортёр не делает из него запись) */
+            if (have_turn && turn >= 0 && turn != g_last_turn) {
                 if (build_snapshot(gs, turn)) { write_snapshot(turn, 1); events_reset(); }
             }
         }

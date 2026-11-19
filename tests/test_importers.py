@@ -225,3 +225,49 @@ def test_v2_full_pipeline_to_report(tmp_path):
     html = build_report(load_match(out), plotly_js=None)
     assert "Timeless Battles v2" in html
     assert "4485" in html and "2185" in html
+
+
+# ---------- v3 (0.8.0): урон по журналу команд и HP-дельтам ----------
+
+V3_INBOX = Path(__file__).parent / "fixtures" / "shim-v3-inbox"
+
+
+def test_v3_damage_per_turn():
+    match = shim.match_from_inbox(V3_INBOX)
+    dmg = {(r.turn, r.player): r.damage for r in match.records if r.damage}
+    assert dmg == {(6, "Goylem"): 6.0, (11, "KOF"): 5.0, (11, "Goylem"): 10.0,
+                   (12, "KOF"): 20.0, (12, "Goylem"): 27.0}
+
+
+def test_v3_damage_totals_filled_and_validation():
+    match = shim.match_from_inbox(V3_INBOX)
+    tot = {p: sum(r.damage for r in match.records_for(p)) for p in ("KOF", "Goylem")}
+    assert tot == {"KOF": 25.0, "Goylem": 43.0}
+    expected = {"score", "cities", "kills", "losses", "army", "income",
+                "captured", "lost_cities", "damage"}
+    for r in match.records:
+        assert r.filled == expected
+    rep = validate_match(match)
+    assert not rep.has_errors
+    assert rep.completeness["KOF"] == 1.0  # 9 из 9 метрик
+
+
+def test_v3_turn_zero_is_baseline_only():
+    match = shim.match_from_inbox(V3_INBOX)
+    assert min(r.turn for r in match.records) == 1
+    assert match.meta.turn_limit == 12
+
+
+def test_v3_command_turns_mapping():
+    cmds = shim.load_commands(V3_INBOX)
+    assert cmds and cmds["v"] == 2
+    turns = shim._command_turns(cmds["commands"])
+    assert len(turns) == cmds["count"]
+    assert turns[0] == 1
+    assert max(turns) == 13  # EndMatch после последнего круга EndTurn
+
+
+def test_v2_inbox_without_commands_v2_has_no_damage():
+    """Обратная совместимость: commands.json v1 → урон не заполняется."""
+    match = shim.match_from_inbox(V2_INBOX)
+    assert all("damage" not in (r.filled or set()) for r in match.records)

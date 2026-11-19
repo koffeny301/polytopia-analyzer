@@ -8,8 +8,13 @@
                   "resigned_turn": -1, "wiped": false,
                   "army": 15, "production": 19}, ...],
      "cities": [[x, y, tile_owner, imp_owner, type, level, production], ...],
-     "units": [[id, owner, health, type], ...],
+     "units": [[id, owner, health, type, x, y], ...],
      "events": [...]}
+
+Рядом лежит `commands.json` (v2) — полный журнал команд матча с координатами
+(AttackCommand: uid/origin/target; Move/Recover/Disband/Explode: координаты)
+и `actions.json` — диагностический перехват очереди анимаций (неполный:
+опрос ловит ~30% боевых действий, для данных НЕ используется).
 
 Превращение в модель Match:
 
@@ -25,7 +30,10 @@
   * events в снимке — диагностические: ActionStack игры является живой
     очередью анимаций, события дублируются/пропускаются, импортёр их
     игнорирует;
-  * damage состояние надёжно не содержит — поле остаётся незаполненным.
+  * damage — реконструкция по журналу команд v2 и HP-дельтам юнитов:
+    атакованные юниты → урон атакующим, контратака → урон защитнику;
+    добивания учитываются по остатку HP (overkill не виден), небоевые
+    исчезновения (посадка на корабль и т.п.) исключаются по командам.
 
 Снимки v1 (без "v"/cities) импортируются по-старому: score/cities/kills/losses.
 Варвары (id 255, племя Nature) в матч не попадают.
@@ -173,6 +181,132 @@ def scan_inbox(directory: Path | str) -> InboxSession:
     return InboxSession(directory=d, files=files, turns=sorted(turns), newest_mtime=newest)
 
 
+def load_commands(directory: Path | str) -> Optional[dict]:
+    """Читает commands.json (журнал команд матча) из папки снимков, если есть."""
+    p = Path(directory) / "commands.json"
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+# ---------- урон по журналу команд и HP-дельтам (M14) ----------
+
+HP_SCALE = 10.0  # внутренняя шкала HP игры: 100 = 10 HP в UI
+
+
+def _command_turns(commands: list[dict]) -> list[int]:
+    """Номер хода для каждой команды: раунд = полный круг EndTurnCommand."""
+    end_ps = {int(c.get("p", 0)) for c in commands if c.get("t") == "EndTurnCommand"}
+    turns: list[int] = []
+    cur, ended = 1, set()
+    for c in commands:
+        turns.append(cur)
+        if c.get("t") == "EndTurnCommand":
+            ended.add(int(c.get("p", 0)))
+            if end_ps and len(ended) == len(end_ps):
+                cur += 1
+                ended = set()
+    return turns
+
+
+def _unit_map(snap: dict) -> dict[int, dict]:
+    return {int(u[0]): {"own": int(u[1]), "hp": int(u[2]),
+                        "x": int(u[4]), "y": int(u[5])}
+            for u in (snap.get("units") or []) if len(u) >= 6}
+
+
+def _compute_damage(snaps: list[dict], commands_doc: dict) -> tuple[dict, list[str]]:
+    """Детерминированная реконструкция урона (проверена на эталонных реплеях).
+
+    Источник истины — снимки (HP юнитов со сквозными id) и commands.json v2
+    (AttackCommand: кто/откуда/куда; Move/Recover/Disband/Explode: координаты).
+    ActionStack игры для этого непригоден: перехват опросом ловит лишь ~30%
+    боевых действий (очередь анимаций опустошается быстрее опроса).
+
+    Правила: потеря HP юнита, по которому в раунде были AttackCommand, —
+    урон атакующих (поровну при нескольких); потеря HP атакующего, которого
+    не били, — контратака (урон записывается защитнику); исчезновение юнита
+    без атаки/Disband/Explode — небоевое (посадка на корабль и т.п.);
+    смерть от атаки учитывается по остатку HP (overkill не виден);
+    лечение в том же раунде занижает урон (флагуется).
+
+    Возвращает ({(ход, id_игрока): урон в единицах UI}, [оговорки]).
+    """
+    commands = commands_doc.get("commands") or []
+    if not commands:
+        return {}, []
+    turn_of = _command_turns(commands)
+    by_turn = {int(s["turn"]): s for s in snaps}
+    dmg: dict[tuple[int, int], float] = {}
+    flags: list[str] = []
+    n_overkill = n_heal = 0
+    for t in range(1, max(by_turn) + 1):
+        if t not in by_turn or (t - 1) not in by_turn:
+            continue
+        prev_u = _unit_map(by_turn[t - 1])
+        cur_u = _unit_map(by_turn[t])
+        pos = {uid: (u["x"], u["y"]) for uid, u in prev_u.items()}
+        attacked_by: dict[int, list[int]] = {}
+        attacker_victims: dict[int, list[int]] = {}
+        recover_xy: set = set()
+        noncombat_xy: set = set()
+        for i, c in enumerate(commands):
+            if turn_of[i] != t:
+                continue
+            ct = c.get("t")
+            if ct == "MoveCommand" and c.get("uid") is not None:
+                pos[int(c["uid"])] = (c.get("tx"), c.get("ty"))
+            elif ct == "AttackCommand":
+                tgt = (c.get("tx"), c.get("ty"))
+                ap = int(c.get("p", -1))
+                victim = next((uid for uid, pxy in pos.items()
+                               if pxy == tgt and uid in prev_u
+                               and prev_u[uid]["own"] != ap), None)
+                if victim is not None:
+                    attacked_by.setdefault(victim, []).append(ap)
+                    if c.get("uid") is not None:
+                        attacker_victims.setdefault(int(c["uid"]), []).append(
+                            prev_u[victim]["own"])
+                auid = c.get("uid")
+                if auid is not None and int(auid) in cur_u:
+                    au = cur_u[int(auid)]
+                    pos[int(auid)] = (au["x"], au["y"])
+            elif ct == "RecoverCommand":
+                recover_xy.add((c.get("x"), c.get("y")))
+            elif ct in ("DisbandCommand", "ExplodeCommand"):
+                noncombat_xy.add((c.get("x"), c.get("y")))
+        for uid, pu in prev_u.items():
+            alive = uid in cur_u
+            loss = pu["hp"] - (cur_u[uid]["hp"] if alive else 0)
+            if loss <= 0:
+                continue
+            if not alive and (pu["x"], pu["y"]) in noncombat_xy:
+                continue  # расформирован/взорван — не боевая потеря
+            atkers = attacked_by.get(uid)
+            if atkers:
+                if alive and (pu["x"], pu["y"]) in recover_xy:
+                    n_heal += 1
+                if not alive:
+                    n_overkill += 1
+                for ap in atkers:
+                    key = (t, ap)
+                    dmg[key] = dmg.get(key, 0.0) + loss / len(atkers) / HP_SCALE
+            elif uid in attacker_victims:
+                victims = attacker_victims[uid]
+                for vo in victims:
+                    key = (t, vo)
+                    dmg[key] = dmg.get(key, 0.0) + loss / len(victims) / HP_SCALE
+            elif alive:
+                flags.append(f"ход {t}: юнит {uid} потерял {loss} HP без команды атаки")
+    if n_overkill:
+        flags.append(f"добиваний с невидимым overkill: {n_overkill}")
+    if n_heal:
+        flags.append(f"лечение в ход атаки: {n_heal}")
+    return dmg, flags
+
+
 def _real_players(snapshot: dict) -> list[dict]:
     out = []
     for p in snapshot.get("players") or []:
@@ -186,10 +320,15 @@ def _real_players(snapshot: dict) -> list[dict]:
     return out
 
 
-def match_from_snapshots(snapshots: Iterable[dict], *, title: str = "",
+def match_from_snapshots(snapshots: Iterable[dict], *, commands: Optional[dict] = None,
+                         title: str = "",
                          date: str = "", link: str = "", mode: str = "", map_name: str = "",
                          notes: str = "") -> Match:
-    """Собирает Match из снимков состояния игры."""
+    """Собирает Match из снимков состояния игры.
+
+    commands — журнал команд матча (commands.json v2, см. load_commands):
+    с ним заполняется последняя метрика — урон (реконструкция по HP-дельтам).
+    """
     snaps = sorted(snapshots, key=lambda s: int(s["turn"]))
     if not snaps:
         raise ValueError("Нет снимков для импорта")
@@ -212,6 +351,12 @@ def match_from_snapshots(snapshots: Iterable[dict], *, title: str = "",
     prev: dict[int, dict] = {}
     v2 = any(_is_v2(s) for s in snaps)
     filled = set(AVAILABLE_METRICS) if v2 else set(AVAILABLE_METRICS_V1)
+    dmg_by: dict = {}
+    dmg_flags: list = []
+    dmg_on = bool(v2 and commands and int(commands.get("v", 1)) >= 2)
+    if dmg_on:
+        dmg_by, dmg_flags = _compute_damage(snaps, commands or {})
+        filled = filled | {"damage"}
     prev_owners: dict[tuple[int, int], int] = {}
     # Ход 0 — начальное состояние ДО проигрывания реплея, а не сыгранный ход:
     # служит лишь базой для приростов и диффа городов. В матч попадает только
@@ -242,12 +387,19 @@ def match_from_snapshots(snapshots: Iterable[dict], *, title: str = "",
                     income=float(p.get("production", 0) or 0) if v2 else 0.0,
                     captured=captured,
                     lost_cities=lost,
+                    damage=float(dmg_by.get((turn, pid), 0.0)) if dmg_on else 0.0,
                     filled=set(filled),
                 ))
             prev[pid] = p
         prev_owners = cur_owners
 
-    if v2:
+    if v2 and dmg_on:
+        default_notes = ("Снято шимом из состояния игры (формат v2): счёт, города, армия, "
+                         "доход городов, убийства, потери, захваты и урон (реконструкция "
+                         "по журналу команд и HP юнитов).")
+        if dmg_flags:
+            default_notes += " Оговорки урона: " + "; ".join(dmg_flags) + "."
+    elif v2:
         default_notes = ("Снято шимом из состояния игры (формат v2): счёт, города, армия, "
                          "доход городов, убийства, потери и захваты. Урон состояние "
                          "не содержит — колонка не заполнена.")
@@ -273,7 +425,9 @@ def match_from_snapshots(snapshots: Iterable[dict], *, title: str = "",
 def match_from_inbox(directory: Path | str, *, title: str = "", date: str = "",
                      link: str = "", mode: str = "", map_name: str = "") -> Match:
     """Читает папку inbox и собирает из неё матч."""
-    return match_from_snapshots(load_snapshots(directory), title=title, date=date,
+    return match_from_snapshots(load_snapshots(directory),
+                                commands=load_commands(directory),
+                                title=title, date=date,
                                 link=link, mode=mode, map_name=map_name)
 
 

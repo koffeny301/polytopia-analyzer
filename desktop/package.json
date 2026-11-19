@@ -1,6 +1,6 @@
 {
   "name": "polytopia-analyzer-desktop",
-  "version": "0.7.3",
+  "version": "0.8.0",
   "private": true,
   "description": "Оболочка Polytopia Analyzer (Tauri + Python sidecar)",
   "type": "commonjs",

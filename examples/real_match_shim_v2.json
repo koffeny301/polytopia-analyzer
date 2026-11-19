@@ -6,7 +6,7 @@
     "map": "Timeless Battles",
     "link": "https://share.polytopia.io/g/35b44c27-a0a2-4f52-3290-08df4019957a",
     "turn_limit": 12,
-    "notes": "Снято шимом из состояния игры (формат v2): счёт, города, армия, доход городов, убийства, потери и захваты. Урон состояние не содержит — колонка не заполнена.",
+    "notes": "Снято шимом из состояния игры (формат v2): счёт, города, армия, доход городов, убийства, потери, захваты и урон (реконструкция по журналу команд и HP юнитов). Оговорки урона: добиваний с невидимым overkill: 4.",
     "source": "shim"
   },
   "players": [
@@ -34,7 +34,8 @@
       "kills": 0,
       "losses": 0,
       "captured": 0,
-      "lost_cities": 0
+      "lost_cities": 0,
+      "damage": 0.0
     },
     {
       "turn": 1,
@@ -46,7 +47,8 @@
       "kills": 0,
       "losses": 0,
       "captured": 0,
-      "lost_cities": 0
+      "lost_cities": 0,
+      "damage": 0.0
     },
     {
       "turn": 2,
@@ -58,7 +60,8 @@
       "kills": 0,
       "losses": 0,
       "captured": 0,
-      "lost_cities": 0
+      "lost_cities": 0,
+      "damage": 0.0
     },
     {
       "turn": 2,
@@ -70,7 +73,8 @@
       "kills": 0,
       "losses": 0,
       "captured": 0,
-      "lost_cities": 0
+      "lost_cities": 0,
+      "damage": 0.0
     },
     {
       "turn": 3,
@@ -82,7 +86,8 @@
       "kills": 0,
       "losses": 0,
       "captured": 0,
-      "lost_cities": 0
+      "lost_cities": 0,
+      "damage": 0.0
     },
     {
       "turn": 3,
@@ -94,7 +99,8 @@
       "kills": 0,
       "losses": 0,
       "captured": 1,
-      "lost_cities": 0
+      "lost_cities": 0,
+      "damage": 0.0
     },
     {
       "turn": 4,
@@ -106,7 +112,8 @@
       "kills": 0,
       "losses": 0,
       "captured": 0,
-      "lost_cities": 0
+      "lost_cities": 0,
+      "damage": 0.0
     },
     {
       "turn": 4,
@@ -118,7 +125,8 @@
       "kills": 0,
       "losses": 0,
       "captured": 0,
-      "lost_cities": 0
+      "lost_cities": 0,
+      "damage": 0.0
     },
     {
       "turn": 5,
@@ -130,7 +138,8 @@
       "kills": 0,
       "losses": 0,
       "captured": 1,
-      "lost_cities": 0
+      "lost_cities": 0,
+      "damage": 0.0
     },
     {
       "turn": 5,
@@ -142,7 +151,8 @@
       "kills": 0,
       "losses": 0,
       "captured": 0,
-      "lost_cities": 0
+      "lost_cities": 0,
+      "damage": 0.0
     },
     {
       "turn": 6,
@@ -154,7 +164,8 @@
       "kills": 0,
       "losses": 0,
       "captured": 0,
-      "lost_cities": 0
+      "lost_cities": 0,
+      "damage": 6.0
     },
     {
       "turn": 6,
@@ -166,7 +177,8 @@
       "kills": 0,
       "losses": 0,
       "captured": 2,
-      "lost_cities": 0
+      "lost_cities": 0,
+      "damage": 0.0
     },
     {
       "turn": 7,
@@ -178,7 +190,8 @@
       "kills": 0,
       "losses": 0,
       "captured": 0,
-      "lost_cities": 0
+      "lost_cities": 0,
+      "damage": 0.0
     },
     {
       "turn": 7,
@@ -190,7 +203,8 @@
       "kills": 0,
       "losses": 0,
       "captured": 0,
-      "lost_cities": 0
+      "lost_cities": 0,
+      "damage": 0.0
     },
     {
       "turn": 8,
@@ -202,7 +216,8 @@
       "kills": 0,
       "losses": 0,
       "captured": 0,
-      "lost_cities": 0
+      "lost_cities": 0,
+      "damage": 0.0
     },
     {
       "turn": 8,
@@ -214,7 +229,8 @@
       "kills": 0,
       "losses": 0,
       "captured": 0,
-      "lost_cities": 0
+      "lost_cities": 0,
+      "damage": 0.0
     },
     {
       "turn": 9,
@@ -226,7 +242,8 @@
       "kills": 0,
       "losses": 0,
       "captured": 0,
-      "lost_cities": 0
+      "lost_cities": 0,
+      "damage": 0.0
     },
     {
       "turn": 9,
@@ -238,7 +255,8 @@
       "kills": 0,
       "losses": 0,
       "captured": 0,
-      "lost_cities": 0
+      "lost_cities": 0,
+      "damage": 0.0
     },
     {
       "turn": 10,
@@ -250,7 +268,8 @@
       "kills": 0,
       "losses": 0,
       "captured": 1,
-      "lost_cities": 0
+      "lost_cities": 0,
+      "damage": 0.0
     },
     {
       "turn": 10,
@@ -262,7 +281,8 @@
       "kills": 0,
       "losses": 0,
       "captured": 1,
-      "lost_cities": 0
+      "lost_cities": 0,
+      "damage": 0.0
     },
     {
       "turn": 11,
@@ -274,7 +294,8 @@
       "kills": 1,
       "losses": 0,
       "captured": 0,
-      "lost_cities": 0
+      "lost_cities": 0,
+      "damage": 10.0
     },
     {
       "turn": 11,
@@ -286,7 +307,8 @@
       "kills": 0,
       "losses": 1,
       "captured": 2,
-      "lost_cities": 0
+      "lost_cities": 0,
+      "damage": 5.0
     },
     {
       "turn": 12,
@@ -298,7 +320,8 @@
       "kills": 1,
       "losses": 1,
       "captured": 0,
-      "lost_cities": 0
+      "lost_cities": 0,
+      "damage": 27.0
     },
     {
       "turn": 12,
@@ -310,7 +333,8 @@
       "kills": 1,
       "losses": 1,
       "captured": 0,
-      "lost_cities": 0
+      "lost_cities": 0,
+      "damage": 20.0
     }
   ]
 }
