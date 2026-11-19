@@ -213,8 +213,13 @@ def match_from_snapshots(snapshots: Iterable[dict], *, title: str = "",
     v2 = any(_is_v2(s) for s in snaps)
     filled = set(AVAILABLE_METRICS) if v2 else set(AVAILABLE_METRICS_V1)
     prev_owners: dict[tuple[int, int], int] = {}
+    # Ход 0 — начальное состояние ДО проигрывания реплея, а не сыгранный ход:
+    # служит лишь базой для приростов и диффа городов. В матч попадает только
+    # если других данных нет (реплей так и не начали проигрывать).
+    emit_zero = not any(int(s["turn"]) >= 1 for s in snaps)
     for snap in snaps:
         turn = int(snap["turn"])
+        emit = turn >= 1 or emit_zero
         cur_owners = _city_owners(snap) if v2 else {}
         for p in _real_players(snap):
             pid = int(p.get("id", -1))
@@ -225,19 +230,20 @@ def match_from_snapshots(snapshots: Iterable[dict], *, title: str = "",
             prev_kills = int(base.get("kills", 0) or 0) if base else 0
             prev_losses = int(base.get("casualties", 0) or 0) if base else 0
             captured, lost = _city_deltas(prev_owners, cur_owners, pid) if v2 else (0, 0)
-            records.append(TurnRecord(
-                turn=turn,
-                player=name,
-                score=float(p.get("score", 0) or 0),
-                cities=int(p.get("cities", 0) or 0),
-                kills=max(0, kills_total - prev_kills),
-                losses=max(0, losses_total - prev_losses),
-                army=int(p.get("army", 0) or 0) if v2 else 0,
-                income=float(p.get("production", 0) or 0) if v2 else 0.0,
-                captured=captured,
-                lost_cities=lost,
-                filled=set(filled),
-            ))
+            if emit:
+                records.append(TurnRecord(
+                    turn=turn,
+                    player=name,
+                    score=float(p.get("score", 0) or 0),
+                    cities=int(p.get("cities", 0) or 0),
+                    kills=max(0, kills_total - prev_kills),
+                    losses=max(0, losses_total - prev_losses),
+                    army=int(p.get("army", 0) or 0) if v2 else 0,
+                    income=float(p.get("production", 0) or 0) if v2 else 0.0,
+                    captured=captured,
+                    lost_cities=lost,
+                    filled=set(filled),
+                ))
             prev[pid] = p
         prev_owners = cur_owners
 
@@ -255,7 +261,7 @@ def match_from_snapshots(snapshots: Iterable[dict], *, title: str = "",
         mode=mode,
         map=map_name,
         link=link,
-        turn_limit=max(int(s["turn"]) for s in snaps),
+        turn_limit=max((r.turn for r in records), default=0),
         notes=(notes or default_notes),
         source="shim",
     )

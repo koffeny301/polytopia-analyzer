@@ -270,10 +270,9 @@ def test_midgame_match(mid):
     kof = match.player("KOF")
     assert kof.tribe == "Luxidoor" and kof.is_human
     recs = match.records_for("KOF")
-    assert [r.turn for r in recs] == [0, 1]
-    assert recs[0].score == 515 and recs[0].army == 1
-    assert recs[1].score == 550 and recs[1].army == 3
-    assert recs[1].kills == 0 and recs[1].losses == 0
+    assert [r.turn for r in recs] == [1]  # начальная секция (ход 0) — не запись
+    assert recs[0].score == 550 and recs[0].army == 3
+    assert recs[0].kills == 0 and recs[0].losses == 0
     rep = validate_match(match)
     assert rep.errors == []
 
@@ -367,9 +366,8 @@ def test_watch_session_builds_history():
     assert len(match.players) == 16
     assert match.meta.source == "state"
     recs = match.records_for("KOF")
-    assert [r.turn for r in recs] == [0, 1]
-    assert recs[0].score == 515 and recs[0].army == 1
-    assert recs[1].score == 550 and recs[1].army == 3
+    assert [r.turn for r in recs] == [1]  # ход 0 — база, не запись
+    assert recs[0].score == 550 and recs[0].army == 3
     assert validate_match(match).errors == []
 
 

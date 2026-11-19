@@ -671,22 +671,28 @@ def match_from_snapshots(snapshots, events: Optional[dict] = None, *,
 
     records: list[TurnRecord] = []
     prev: dict[int, dict] = {}
+    # Ход 0 — начальное состояние партии, а не сыгранный ход: служит лишь
+    # базой для приростов. В матч попадает только если других данных нет
+    # (сейв свежей партии).
+    emit_zero = not any(int(s["turn"]) >= 1 for s in snaps)
     for s in snaps:
         turn = int(s["turn"])
+        emit = turn >= 1 or emit_zero
         for p in s["players"]:
             pid = int(p["id"])
             if pid not in name_by_id:
-                continue
+                continue  # варвары (id 0) и неизвестные id
             base = prev.get(pid)
             kills = max(0, int(p["kills"]) - (int(base["kills"]) if base else 0))
             losses = max(0, int(p["losses"]) - (int(base["losses"]) if base else 0))
-            records.append(TurnRecord(
-                turn=turn, player=name_by_id[pid],
-                score=float(p["score"]), cities=int(p["cities"]),
-                army=int(p.get("army", 0)),
-                kills=kills, losses=losses,
-                filled={"score", "cities", "army", "kills", "losses"},
-            ))
+            if emit:
+                records.append(TurnRecord(
+                    turn=turn, player=name_by_id[pid],
+                    score=float(p["score"]), cities=int(p["cities"]),
+                    army=int(p.get("army", 0)),
+                    kills=kills, losses=losses,
+                    filled={"score", "cities", "army", "kills", "losses"},
+                ))
             prev[pid] = p
 
     # захваты из истории действий: сливаем в снимки своего хода,

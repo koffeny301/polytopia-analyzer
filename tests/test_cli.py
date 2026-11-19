@@ -195,7 +195,7 @@ def test_import_state_midgame(tmp_path, capsys):
     assert len(match.player_names()) == 16
     assert match.max_turn() == 1
     assert match.player("KOF").tribe == "Luxidoor"
-    assert [r.turn for r in match.records_for("KOF")] == [0, 1]
+    assert [r.turn for r in match.records_for("KOF")] == [1]  # ход 0 — база, не запись
 
 
 def test_analyze_default_output_path(sample_csv, capsys):

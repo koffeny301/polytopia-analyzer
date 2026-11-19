@@ -1295,8 +1295,11 @@ static int build_snapshot(void *gs, int turn) {
 /* Снимок хода берётся в момент смены CurrentTurn — тогда значения совпадают
  * с тем, что HUD показывает для этого хода (проверено сверкой с OCR-эталоном:
  * первый же опрос нового хода даёт ровно те числа). latest.json обновляется
- * всегда, чтобы видеть текущее состояние. */
+ * всегда, чтобы видеть текущее состояние.
+ * Ход 0 — начальное состояние ДО проигрывания реплея, а не сыгранный ход:
+ * снимок snapshot-000 не пишется (иначе в матче появляется лишний ход). */
 static void write_snapshot(int turn, int force) {
+    if (turn < 1) return;
     if (!force && turn == g_last_turn) return;
     g_last_turn = turn;
     char path[1300];
@@ -1452,8 +1455,9 @@ static void run_dump(void) {
                 if (++diag_tick % 10 == 0) target_diag();
             }
             int turn = 0;
-            /* тяжёлая часть (карта, снимок) — только в момент смены хода */
-            if (snapshot(gs, &turn) && turn != g_last_turn) {
+            /* тяжёлая часть (карта, снимок) — только в момент смены хода;
+             * ход 0 (начальное состояние до проигрывания) не снимаем */
+            if (snapshot(gs, &turn) && turn >= 1 && turn != g_last_turn) {
                 if (build_snapshot(gs, turn)) { write_snapshot(turn, 1); events_reset(); }
             }
         }

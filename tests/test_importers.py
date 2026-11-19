@@ -47,10 +47,10 @@ def test_meta_source_is_shim(inbox):
 def test_score_and_cities_are_snapshots(inbox):
     match = shim.match_from_inbox(inbox)
     kof = match.records_for("KOF")
-    assert [r.turn for r in kof] == list(range(13))
+    assert [r.turn for r in kof] == list(range(1, 13))  # ход 0 — база, не запись
     assert kof[-1].score == 4485
     assert kof[-1].cities == 7
-    assert [r.score for r in kof[:3]] == [565, 565, 595]
+    assert [r.score for r in kof[:3]] == [565, 595, 890]
 
 
 def test_kills_and_losses_are_deltas(inbox):
@@ -62,8 +62,9 @@ def test_kills_and_losses_are_deltas(inbox):
         for snap in snaps:
             p = next(x for x in snap["players"] if x["id"] == pid)
             turn = int(snap["turn"])
-            assert recs[turn].kills == p["kills"] - prev_k
-            assert recs[turn].losses == p["casualties"] - prev_l
+            if turn >= 1:  # ход 0 — базовый снимок, записи не имеет
+                assert recs[turn].kills == p["kills"] - prev_k
+                assert recs[turn].losses == p["casualties"] - prev_l
             prev_k, prev_l = p["kills"], p["casualties"]
 
 
@@ -184,6 +185,7 @@ def test_v2_cities_counter_consistency():
 
 def test_v2_filled_and_validation():
     match = shim.match_from_inbox(V2_INBOX)
+    assert sorted({r.turn for r in match.records}) == list(range(1, 13))  # без хода 0
     expected = {"score", "cities", "kills", "losses",
                 "army", "income", "captured", "lost_cities"}
     for r in match.records:
