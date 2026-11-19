@@ -473,12 +473,24 @@ def cmd_install_shim(args: argparse.Namespace) -> int:
 # ---------- web ----------
 
 def cmd_web(args: argparse.Namespace) -> int:
-    from .webapp import serve
+    import errno
+    import webbrowser
+
+    from .webapp import existing_server_url, serve
 
     try:
         serve(host=args.host, port=args.port, data_dir=args.data_dir,
               open_browser=not args.no_browser)
     except OSError as e:
+        if getattr(e, "errno", None) == errno.EADDRINUSE:
+            # Порт занят. Если там уже наш сервер — не ошибка: открываем браузер
+            # (ярлык в меню «не запускается», когда инстанс уже работает).
+            url = existing_server_url(args.host, args.port)
+            if url:
+                if not args.no_browser:
+                    webbrowser.open(url)
+                print(f"Polytopia Analyzer уже запущен — открываю браузер: {url}")
+                return 0
         print(f"Ошибка: не удалось запустить сервер на {args.host}:{args.port} ({e})")
         return 1
     return 0

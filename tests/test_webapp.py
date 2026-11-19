@@ -477,3 +477,50 @@ def test_index_has_ocr_ui(base):
     assert status == 200
     assert 'id="ocr-file"' in body
     assert 'id="ocr-dialog"' in body
+
+
+def test_web_reuses_running_instance(base, monkeypatch, capsys):
+    """Порт занят нашим сервером → не ошибка, а открытие браузера (exit 0)."""
+    from polytopia_analyzer import cli
+
+    url, _ = base
+    port = int(url.rsplit(":", 1)[1])
+    opened = []
+    monkeypatch.setattr("webbrowser.open", lambda u, *a, **k: opened.append(u) or True)
+    rc = cli.main(["web", "--port", str(port)])
+    assert rc == 0
+    assert opened == [f"http://127.0.0.1:{port}/"]
+    assert "уже запущен" in capsys.readouterr().out
+
+
+def test_web_port_busy_by_foreign_server(monkeypatch, capsys):
+    """Порт занят чужим сервисом → понятная ошибка, exit 1."""
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from polytopia_analyzer import cli
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, format, *args):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    try:
+        port = srv.server_address[1]
+        opened = []
+        monkeypatch.setattr("webbrowser.open", lambda u, *a, **k: opened.append(u) or True)
+        rc = cli.main(["web", "--port", str(port)])
+        assert rc == 1
+        assert not opened
+        assert "Ошибка" in capsys.readouterr().out
+    finally:
+        srv.shutdown()
+        srv.server_close()
+        t.join(timeout=5)

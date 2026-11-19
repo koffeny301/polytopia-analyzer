@@ -15,6 +15,7 @@ import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import __version__
@@ -374,6 +375,26 @@ def create_server(host: str = "127.0.0.1", port: int = 8765,
     httpd.data_dir = data  # type: ignore[attr-defined]
     httpd.verbose = verbose  # type: ignore[attr-defined]
     return httpd
+
+
+def existing_server_url(host: str, port: int, timeout: float = 1.5) -> Optional[str]:
+    """URL уже работающего сервера Polytopia Analyzer, либо None.
+
+    Используется, когда порт занят: если там наш экземпляр (health отвечает ok
+    и заголовок Server наш) — просто открываем браузер вместо ошибки.
+    """
+    import urllib.request
+
+    url = f"http://{host}:{port}/"
+    try:
+        with urllib.request.urlopen(url + "api/health", timeout=timeout) as r:
+            server = r.headers.get("Server", "")
+            data = json.loads(r.read().decode("utf-8"))
+            if data.get("ok") and server.startswith("PolytopiaAnalyzer"):
+                return url
+    except Exception:
+        pass
+    return None
 
 
 def serve(host: str = "127.0.0.1", port: int = 8765,
