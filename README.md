@@ -167,9 +167,16 @@ polytopia-analyzer import-state ~/game.state -o data/sp.json --title "Моя п�
 polytopia-analyzer import-state --watch        # пишет матч по ходу партии
 ```
 
-Демо: `examples/demo_match.csv` (сгенерирован `examples/make_demo.py`).
+### Примеры данных
+
+- `examples/real_match_shim_v2.json` / `.csv` — **настоящий матч**, снятый шимом v2
+  из реплея Timeless Battles (KOF vs Goylem, 12 ходов): счёт, города, армия, доход,
+  убийства, потери и захваты — 8 из 9 метрик автоматически (урон пока только вручную).
+- `examples/demo_match.csv` / `.json` — синтетический демо-матч на 30 ходов
+  (3 игрока, все метрики заполнены); генерируется `examples/make_demo.py`.
 
 ```bash
+polytopia-analyzer analyze examples/real_match_shim_v2.csv -o reports/real.html --open
 polytopia-analyzer analyze examples/demo_match.csv -o reports/demo.html --open
 ```
 

@@ -7,6 +7,7 @@
 
 import random
 import sys
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -101,10 +102,10 @@ def build_match() -> Match:
     return Match(
         meta=MatchMeta(
             title="Демо-матч: Vengir против Bardur и Ai-Mo",
-            date="2026-11-12",
+            date=date.today().isoformat(),
             mode="Domination",
             map="Large · Continent",
-            link="https://share.polytopia.io/g/a4d531fd-1b81-428c-d81f-08dae2baaab2",
+            link="",  # матч синтетический — реального реплея нет
             turn_limit=30,
             notes="Синтетические данные для демонстрации отчёта.",
         ),
