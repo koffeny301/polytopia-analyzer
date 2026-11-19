@@ -524,3 +524,71 @@ def test_web_port_busy_by_foreign_server(monkeypatch, capsys):
         srv.shutdown()
         srv.server_close()
         t.join(timeout=5)
+
+
+# ---------- защита от CSRF / DNS-rebinding ----------
+
+def _conn(base):
+    import http.client
+
+    url, _ = base
+    port = int(url.rsplit(":", 1)[1])
+    return http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+
+
+def test_rejects_foreign_host_header(base):
+    """Host не-localhost отклоняется (защита от DNS-rebinding)."""
+    c = _conn(base)
+    c.request("GET", "/api/health", headers={"Host": "evil.example.com"})
+    r = c.getresponse()
+    assert r.status == 421
+    r.read()
+    c.close()
+
+
+def test_rejects_cross_origin_post(base):
+    """POST с чужим Origin отклоняется (защита от CSRF)."""
+    c = _conn(base)
+    c.request("POST", "/api/link", body=b'{"link":"x"}',
+              headers={"Origin": "http://evil.example.com"})
+    r = c.getresponse()
+    assert r.status == 403
+    r.read()
+    c.close()
+
+
+def test_allows_same_origin_post(base):
+    url, _ = base
+    port = int(url.rsplit(":", 1)[1])
+    gid = "12345678-1234-1234-1234-123456789abc"
+    c = _conn(base)
+    c.request("POST", "/api/link", body=json.dumps({"link": gid}).encode(),
+              headers={"Origin": f"http://127.0.0.1:{port}",
+                       "Content-Type": "application/json"})
+    r = c.getresponse()
+    assert r.status == 200
+    data = json.loads(r.read())
+    assert data["ok"] and data["game_id"] == gid
+    c.close()
+
+
+def test_allows_localhost_origin_alias(base):
+    """UI открыт по http://localhost:PORT — тот же loopback, разрешаем."""
+    url, _ = base
+    port = int(url.rsplit(":", 1)[1])
+    c = _conn(base)
+    c.request("POST", "/api/link",
+              body=b'{"link":"12345678-1234-1234-1234-123456789abc"}',
+              headers={"Origin": f"http://localhost:{port}"})
+    r = c.getresponse()
+    assert r.status == 200
+    r.read()
+    c.close()
+
+
+def test_post_without_origin_allowed(base):
+    """Не-браузерные клиенты (curl/CLI) Origin не шлют — работаем."""
+    status, body = req(base[0] + "/api/link", method="POST",
+                       data=json.dumps({"link": "12345678-1234-1234-1234-123456789abc"}))
+    assert status == 200
+    assert '"ok": true' in body

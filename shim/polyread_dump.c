@@ -424,18 +424,60 @@ static void *f_ptr(void *obj, Il2CppClass *k, const char *name) {
     return v;
 }
 
-/* строка .NET → utf8 (упрощённо: latin/utf16 → ascii-совместимо) */
+/* строка .NET (UTF-16) → UTF-8; суррогатные пары собираются */
 static void read_str(void *s, char *buf, size_t cap) {
     buf[0] = 0;
-    if (!ptr_ok(s) || cap < 2) return;
+    if (!ptr_ok(s) || cap < 5) return;
     int32_t len = mem_i32(s, 16); /* Il2CppString.length */
     if (len <= 0 || len > 128) return;
     size_t o = 0;
-    for (int32_t i = 0; i < len && o + 1 < cap; ++i) {
-        uint16_t ch = mem_u16(s, 20 + (size_t)i * 2);
-        buf[o++] = (ch < 128) ? (char)ch : '?';
+    for (int32_t i = 0; i < len; ++i) {
+        uint32_t ch = mem_u16(s, 20 + (size_t)i * 2);
+        if (ch >= 0xD800 && ch <= 0xDBFF && i + 1 < len) {
+            uint32_t lo = mem_u16(s, 20 + (size_t)(i + 1) * 2);
+            if (lo >= 0xDC00 && lo <= 0xDFFF) {
+                ch = 0x10000u + ((ch - 0xD800u) << 10) + (lo - 0xDC00u);
+                ++i;
+            }
+        }
+        if (o + 4 >= cap) break;
+        if (ch < 0x80) {
+            buf[o++] = (char)ch;
+        } else if (ch < 0x800) {
+            buf[o++] = (char)(0xC0 | (ch >> 6));
+            buf[o++] = (char)(0x80 | (ch & 0x3F));
+        } else if (ch < 0x10000) {
+            buf[o++] = (char)(0xE0 | (ch >> 12));
+            buf[o++] = (char)(0x80 | ((ch >> 6) & 0x3F));
+            buf[o++] = (char)(0x80 | (ch & 0x3F));
+        } else {
+            buf[o++] = (char)(0xF0 | (ch >> 18));
+            buf[o++] = (char)(0x80 | ((ch >> 12) & 0x3F));
+            buf[o++] = (char)(0x80 | ((ch >> 6) & 0x3F));
+            buf[o++] = (char)(0x80 | (ch & 0x3F));
+        }
     }
     buf[o] = 0;
+}
+
+/* экранирование строки для JSON: кавычки, backslash и управляющие символы
+ * (имена игроков приходят из памяти игры — нельзя ломать ими снимок) */
+static void json_escape(char *dst, size_t dstsz, const char *src) {
+    size_t o = 0;
+    for (const unsigned char *s = (const unsigned char *)src; *s; ++s) {
+        if (*s == '"' || *s == '\\') {
+            if (o + 2 >= dstsz) break;
+            dst[o++] = '\\';
+            dst[o++] = (char)*s;
+        } else if (*s < 0x20) {
+            if (o + 7 >= dstsz) break;
+            o += (size_t)snprintf(dst + o, dstsz - o, "\\u%04x", (unsigned)*s);
+        } else {
+            if (o + 1 >= dstsz) break;
+            dst[o++] = (char)*s;
+        }
+    }
+    dst[o] = 0;
 }
 
 /* элементы List<T> */
@@ -1258,7 +1300,8 @@ static int build_snapshot(void *gs, int turn) {
         f_u32(ps, g_playstate_cls, "endScore", &endscore);
         f_u32(ps, g_playstate_cls, "kills", &kills);
         f_u32(ps, g_playstate_cls, "casualities", &cas);
-        char name[80]; read_str(f_ptr(ps, g_playstate_cls, "<UserName>k__BackingField"), name, sizeof(name));
+        char name[256]; read_str(f_ptr(ps, g_playstate_cls, "<UserName>k__BackingField"), name, sizeof(name));
+        char name_esc[640]; json_escape(name_esc, sizeof(name_esc), name);
         int32_t tribe = 0;
         f_i32(ps, g_playstate_cls, "tribe", &tribe);
         int32_t wiped = 0;
@@ -1266,13 +1309,13 @@ static int build_snapshot(void *gs, int turn) {
         int a = id < 255 ? army[id] : 0;
         int pr = id < 255 ? production[id] : 0;
 
-        if (o + 512 >= sizeof(g_turn_json)) break;
+        if (o + 1024 >= sizeof(g_turn_json)) break;
         o += (size_t)snprintf(g_turn_json + o, sizeof(g_turn_json) - o,
                               "%s{\"id\": %u, \"name\": \"%s\", \"tribe\": %d, \"score\": %u, "
                               "\"end_score\": %u, \"stars\": %d, \"cities\": %d, \"kills\": %u, "
                               "\"casualties\": %u, \"resigned_turn\": %d, \"wiped\": %s, "
                               "\"army\": %d, \"production\": %d}",
-                              wrote ? ", " : "", (unsigned)id, name, tribe, score, endscore, stars,
+                              wrote ? ", " : "", (unsigned)id, name_esc, tribe, score, endscore, stars,
                               cities, kills, cas, resigned, wiped >= 0 ? "true" : "false", a, pr);
         wrote++;
         logf_("  ход %d: игрок %u «%s» племя=%d счёт=%u звёзды=%d города=%d убийства=%u "

@@ -43,6 +43,18 @@ INDEX_HTML = ASSETS_DIR / "webui.html"
 DEFAULT_DATA_DIR = paths.matches_dir()
 MAX_BODY_BYTES = 15 * 1024 * 1024
 ALLOWED_SUFFIXES = (".json", ".csv")
+MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]"})
+
+
+def _host_only(netloc: str) -> str:
+    """Хост из Host/Origin-заголовка (без порта), IPv6 — в квадратных скобках."""
+    n = (netloc or "").strip().lower()
+    if n.startswith("["):
+        return n.split("]", 1)[0] + "]"
+    if n.count(":") > 1:  # голый IPv6
+        return "[" + n + "]"
+    return n.rsplit(":", 1)[0] if ":" in n else n
 
 
 def safe_match_path(data_dir: Path, name: str) -> Path:
@@ -127,6 +139,14 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _route(self, handler) -> None:
         try:
+            # Сервер локальный: защищаемся от DNS-rebinding (чужой Host) и от
+            # CSRF (междоменный POST/DELETE со страницы злоумышленника).
+            if not self._host_allowed():
+                return self._fail(421, "Запрос отклонён: недопустимый заголовок Host "
+                                       "(сервер работает только для localhost)")
+            if self.command in MUTATING_METHODS and not self._origin_allowed():
+                return self._fail(403, "Запрос отклонён: междоменный запрос "
+                                       "(защита от CSRF)")
             handler(urlparse(self.path))
         except ValueError as e:
             self._fail(400, str(e))
@@ -137,6 +157,47 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._fail(500, f"Внутренняя ошибка: {e}")
             except OSError:
                 pass
+
+    # ---------- защита от CSRF / DNS-rebinding ----------
+
+    def _is_loopback_bind(self) -> bool:
+        return getattr(self.server, "bind_host", "127.0.0.1") in (
+            "127.0.0.1", "::1", "localhost")
+
+    def _host_allowed(self) -> bool:
+        """При привязке к loopback принимаем только localhost-Host."""
+        if not self._is_loopback_bind():
+            return True  # явный --host 0.0.0.0 — осознанный выбор пользователя
+        host_header = self.headers.get("Host") or ""
+        if not host_header.strip():
+            return False
+        return _host_only(host_header) in _LOOPBACK_HOSTS
+
+    def _origin_allowed(self) -> bool:
+        """Origin (если браузер его прислал) обязан совпадать с Host.
+
+        Запросы без Origin (curl, собственный CLI, health-поллинг оболочки)
+        проходят: они не подвержены CSRF.
+        """
+        origin = self.headers.get("Origin")
+        if origin is None:
+            return True
+        o = urlparse(origin.strip())
+        if o.scheme not in ("http", "https") or not o.netloc:
+            return False
+        host_header = (self.headers.get("Host") or "").strip()
+        if o.netloc.lower() == host_header.lower():
+            return True
+        # UI открыт по http://localhost:PORT, а Host — 127.0.0.1:PORT (и наоборот)
+        o_host, h_host = _host_only(o.netloc), _host_only(host_header)
+        if o_host in _LOOPBACK_HOSTS and h_host in _LOOPBACK_HOSTS:
+            o_port = o.port or (443 if o.scheme == "https" else 80)
+            try:
+                h_port = urlparse("//" + host_header).port
+            except ValueError:
+                h_port = None
+            return h_port is not None and o_port == h_port
+        return False
 
     # ---------- GET ----------
 
@@ -374,6 +435,7 @@ def create_server(host: str = "127.0.0.1", port: int = 8765,
     httpd.daemon_threads = True
     httpd.data_dir = data  # type: ignore[attr-defined]
     httpd.verbose = verbose  # type: ignore[attr-defined]
+    httpd.bind_host = host  # type: ignore[attr-defined]
     return httpd
 
 

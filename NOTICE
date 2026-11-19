@@ -1,0 +1,19 @@
+Polytopia Match Analyzer — сторонние компоненты
+================================================
+
+- plotly.js (basic bundle, v3.8.2) — встроен в polytopia_analyzer/assets/plotly-basic.min.js
+  и используется в HTML-отчётах. MIT License, Copyright (c) 2012-2025 Plotly, Inc.
+  https://github.com/plotly/plotly.js
+
+- Tauri 2 (desktop/) — оболочка десктоп-приложения.
+  MIT License или Apache License 2.0, Copyright (c) 2017-present Tauri Programme
+  within Commons Conservancy. https://github.com/tauri-apps/tauri
+
+- PyInstaller (сборка) — GPL-2.0-or-later с исключительным разрешением для
+  собранных исполняемых файлов (runtime exception); на лицензию программы
+  не влияет. https://github.com/pyinstaller/pyinstaller
+
+- Python standard library — PSF License.
+
+Игра «The Battle of Polytopia» и торговая марка Polytopia принадлежат
+Midjiwan AB. Проект не аффилирован с Midjiwan AB и не модифицирует файлы игры.
