@@ -5,7 +5,7 @@ from polytopia_analyzer.report import build_report, load_bundled_plotly
 
 CHART_IDS = [
     "chart-score", "chart-income", "chart-army", "chart-cities",
-    "chart-kills", "chart-losses", "chart-combat", "chart-ranks",
+    "chart-kills", "chart-losses", "chart-damage", "chart-combat", "chart-ranks",
 ]
 
 
@@ -35,6 +35,18 @@ def test_report_is_full_html_document_with_charts():
     assert "Plotly.newPlot" in html
     for cid in CHART_IDS:
         assert f'id="{cid}"' in html
+    assert "Урон по ходам" in html and "Нанесено урона" in html
+
+
+def test_damage_chart_absent_without_damage():
+    """Старые матчи без урона: ни графика урона, ни нулевого бара в итогах."""
+    m = make_match()
+    for r in m.records:
+        r.damage = 0.0
+    html = build_report(m)
+    assert 'id="chart-damage"' not in html
+    assert "Урон по ходам" not in html
+    assert "Нанесено урона" not in html
 
 
 def test_report_contains_title_meta_and_players():

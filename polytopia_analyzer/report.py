@@ -30,12 +30,14 @@ COMBAT_BAR_COLORS = {
     "losses": "#ff9d9a",
     "captured": "#4e79a7",
     "lost_cities": "#a0cbe8",
+    "damage": "#f28e2b",
 }
 COMBAT_BAR_LABELS = {
     "kills": "Убито юнитов врага",
     "losses": "Потеряно юнитов",
     "captured": "Захвачено городов",
     "lost_cities": "Потеряно городов",
+    "damage": "Нанесено урона",
 }
 
 
@@ -113,10 +115,27 @@ def _build_figures(match: Match) -> dict[str, dict]:
         "layout": _base_layout("Накопительно: потеряно своих юнитов", "Юниты"),
     }
 
+    has_damage = any(r.damage for r in match.records)
+    if has_damage:
+        dmg = {"data": [], "layout": _base_layout("Урон по ходам", "HP")}
+        dmg["layout"]["barmode"] = "group"
+        for p in match.players:
+            pts = [(r.turn, r.damage) for r in match.records_for(p.name) if r.damage]
+            dmg["data"].append({
+                "type": "bar",
+                "name": p.name,
+                "x": [t for t, _ in pts],
+                "y": [d for _, d in pts],
+                "marker": {"color": colors.get(p.name)},
+            })
+        figs["chart-damage"] = dmg
+
     stats = standings(match)
+    combat_labels = COMBAT_BAR_LABELS if has_damage else {
+        k: v for k, v in COMBAT_BAR_LABELS.items() if k != "damage"}
     combat = {"data": [], "layout": _base_layout("Боевые итоги матча", "Количество")}
     combat["layout"]["legend"] = {"orientation": "h", "y": -0.25, "x": 0}
-    for field_name, label in COMBAT_BAR_LABELS.items():
+    for field_name, label in combat_labels.items():
         combat["data"].append({
             "type": "bar",
             "name": label,
@@ -344,6 +363,7 @@ def build_report(match: Match, plotly_js=_AUTO) -> str:
         f"{_chart_block('chart-army')}{_chart_block('chart-ranks')}</div>",
         f'<h2>Боевые действия</h2><div class="grid2">'
         f"{_chart_block('chart-kills')}{_chart_block('chart-losses')}</div>",
+        (_chart_block("chart-damage") if "chart-damage" in figs else ""),
         _chart_block("chart-combat"),
         _awards_block(match),
         f"<footer>Сгенерировано polytopia-match-analyzer v{__version__} · {generated}</footer>",
