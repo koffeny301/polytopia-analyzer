@@ -324,7 +324,8 @@ recorded points, standings from the last known score.
 - Lead timeline (who was ahead on each turn);
 - Economy: ☆/turn income and city count;
 - Army: size per turn and player rank changes;
-- Combat: cumulative kills/losses and combat-outcome comparison;
+- Combat: cumulative kills/losses, per-turn damage bars (when damage data
+  exists) and combat-outcome comparison incl. total damage dealt;
 - Awards: "Warrior", "Economist", "Conqueror", "Sniper", "Strategist".
 
 The report is self-contained: plotly.js is embedded in the HTML (~1 MB), no
@@ -749,7 +750,8 @@ turn,player,score,income,army,cities,kills,losses,captured,lost_cities,damage
 - Хронология лидерства (кто вёл на каждом ходу);
 - Экономика: доход ☆/ход и число городов;
 - Армия: размер по ходам и смена мест игроков;
-- Боевые действия: накопительные kills/losses и сравнение боевых итогов;
+- Боевые действия: накопительные kills/losses, урон по ходам (когда данные
+  урона есть) и сравнение боевых итогов, включая суммарный урон;
 - Награды: «Воин», «Экономист», «Завоеватель», «Снайпер», «Стратег».
 
 Отчёт самодостаточен: plotly.js встроен в HTML (~1 МБ), интернет не нужен.
