@@ -112,7 +112,8 @@ PolyMod на Steam/Proton, OCR-скриншоты) — формат матча
 ## Установка из исходников
 
 ```bash
-cd /mnt/data/проекты/polytopia-match-analyzer
+git clone https://github.com/koffeny301/polytopia-analyzer.git
+cd polytopia-match-analyzer
 python3 -m venv .venv
 .venv/bin/pip install -e .          # консольная команда polytopia-analyzer
 .venv/bin/pip install pytest        # для разработки
