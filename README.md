@@ -390,6 +390,21 @@ polytopia_analyzer/
   it is enabled/disabled by an explicit action, game files are untouched.
 - Details and how to report a vulnerability — [SECURITY.md](SECURITY.md).
 
+#### Legal notice
+
+This project is an independent fan tool: it is not affiliated with, endorsed
+by, or sponsored by Midjiwan AB. "The Battle of Polytopia" is a trademark of
+Midjiwan AB.
+
+Midjiwan's Terms of Service (section 2.2(a)) prohibit reverse engineering the
+game and using Polytopia to develop products or services without Midjiwan's
+prior written approval. Reading game state (the shim) and parsing `.state`
+saves may fall under that restriction. By using this tool you accept that risk
+yourself; the tool is intended solely for analyzing your own finished matches
+(replays and single-player saves), is strictly read-only, and never contacts
+Midjiwan's servers. If in doubt, request written approval from Midjiwan before
+use.
+
 ### Third-party components
 
 plotly.js (MIT), Tauri (MIT/Apache-2.0), PyInstaller (GPL with runtime
@@ -796,6 +811,21 @@ polytopia_analyzer/
 - Шим только читает состояние игры и пишет JSON в каталог пользователя;
   включается/выключается явным действием, файлы игры не меняются.
 - Подробности и как сообщить об уязвимости — [SECURITY.md](SECURITY.md).
+
+#### Правовое предупреждение
+
+Проект — независимый фанатский инструмент: не аффилирован с Midjiwan AB, не
+одобрен и не спонсируется ею. «The Battle of Polytopia» — торговая марка
+Midjiwan AB.
+
+Условия использования Polytopia (п. 2.2(a)) запрещают реверс-инжиниринг игры и
+использование Polytopia для разработки продуктов или услуг без
+предварительного письменного разрешения Midjiwan. Чтение состояния игры (шим)
+и разбор сейвов `.state` могут подпадать под это ограничение. Используя
+инструмент, вы принимаете этот риск на себя; инструмент предназначен только для
+разбора ваших собственных завершённых матчей (реплеи и одиночные сейвы),
+работает строго на чтение и не обращается к серверам Midjiwan. При сомнениях
+запросите письменное разрешение Midjiwan до использования.
 
 ### Сторонние компоненты
 

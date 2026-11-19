@@ -8,7 +8,13 @@ version = "0.7.3"
 description = "Анализ матчей The Battle of Polytopia: HTML-отчёты в стиле Civilization"
 readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "koffeny301" }]
 dependencies = []
+
+[project.urls]
+Repository = "https://github.com/koffeny301/polytopia-analyzer"
+Issues = "https://github.com/koffeny301/polytopia-analyzer/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]

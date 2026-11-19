@@ -15,5 +15,11 @@ Polytopia Match Analyzer — сторонние компоненты
 
 - Python standard library — PSF License.
 
+- Steam and the Steam logo are trademarks of Valve Corporation; referenced for
+  identification purposes only.
+
 Игра «The Battle of Polytopia» и торговая марка Polytopia принадлежат
 Midjiwan AB. Проект не аффилирован с Midjiwan AB и не модифицирует файлы игры.
+Условия использования Polytopia (п. 2.2(a)) запрещают реверс-инжиниринг и
+разработку продуктов на основе игры без письменного разрешения Midjiwan —
+см. правовое предупреждение в README.
