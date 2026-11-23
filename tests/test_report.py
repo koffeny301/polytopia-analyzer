@@ -6,6 +6,7 @@ from polytopia_analyzer.report import build_report, load_bundled_plotly
 CHART_IDS = [
     "chart-score", "chart-income", "chart-army", "chart-cities",
     "chart-kills", "chart-losses", "chart-damage", "chart-combat", "chart-ranks",
+    "chart-eval",
 ]
 
 

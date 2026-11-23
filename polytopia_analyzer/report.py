@@ -14,12 +14,14 @@ from .analysis import (
     cumulative_series,
     leader_changes,
     metric_series,
+    player_color,
     player_stats,
     rank_history,
     score_series,
     standings,
 )
 from .models import Match
+from .review import MatchReview, review_match
 
 _BUNDLED_PLOTLY = Path(__file__).parent / "assets" / "plotly-basic.min.js"
 _PLOTLY_CDN = "https://cdn.plot.ly/plotly-basic-2.35.2.min.js"
@@ -85,7 +87,7 @@ def _line_traces(series: dict[str, list[tuple[int, float]]], colors: dict[str, s
     return traces
 
 
-def _build_figures(match: Match) -> dict[str, dict]:
+def _build_figures(match: Match, review: MatchReview) -> dict[str, dict]:
     colors = {n: s.color for n, s in player_stats(match).items()}
     figs: dict[str, dict] = {}
 
@@ -160,7 +162,41 @@ def _build_figures(match: Match) -> dict[str, dict]:
             "marker": {"size": 6},
         })
     figs["chart-ranks"] = ranks
+
+    if _review_supported(match):
+        ev = {"data": [], "layout": _base_layout("Оценка преимущества по ходам", "Перевес")}
+        ev["layout"]["yaxis"].update({"range": [-110, 110], "zeroline": True,
+                                      "zerolinecolor": "rgba(255,255,255,0.35)"})
+        eval_at: dict[tuple[str, int], float] = {}
+        for name, pts in review.eval_series.items():
+            ev["data"].append({
+                "type": "scatter",
+                "mode": "lines",
+                "name": name,
+                "x": [t for t, _ in pts],
+                "y": [v for _, v in pts],
+                "line": {"color": colors.get(name), "width": 3},
+            })
+            eval_at.update({(name, t): v for t, v in pts})
+        if review.key_moments:
+            ev["data"].append({
+                "type": "scatter",
+                "mode": "markers",
+                "name": "Ключевые моменты",
+                "x": [m[0] for m in review.key_moments],
+                "y": [eval_at.get((m[1], m[0]), 0.0) for m in review.key_moments],
+                "marker": {"color": "#d4af37", "size": 9, "symbol": "x"},
+                "hovertext": [f"{m[1]}: {m[2]}" for m in review.key_moments],
+                "hoverinfo": "text+x",
+            })
+        figs["chart-eval"] = ev
     return figs
+
+
+def _review_supported(match: Match) -> bool:
+    """Разбор имеет смысл только при данных о боевых/городских исходах ходов."""
+    return any(r.kills or r.losses or r.captured or r.lost_cities or r.damage
+               for r in match.records)
 
 
 # ---------- HTML-блоки ----------
@@ -210,6 +246,16 @@ table.standings tr:hover td { background:rgba(255,255,255,.03); }
 .timeline .step { background:var(--panel2); border:1px solid var(--border);
         border-radius:10px; padding:7px 12px; font-size:13px; }
 .timeline .step b { color:var(--gold); }
+.review-cards { display:flex; gap:14px; flex-wrap:wrap; }
+.review-card { flex:1; min-width:170px; background:var(--panel2);
+        border:1px solid var(--border); border-left:4px solid var(--gold);
+        border-radius:10px; padding:12px 16px; text-align:center; }
+.rc-name { font-weight:600; font-size:14px; }
+.rc-acc { font-size:30px; font-weight:700; margin:4px 0; }
+.rc-sub { color:var(--muted); font-size:12px; }
+.rc-h { margin:4px 0 10px; }
+.review-list { margin:0; padding-left:20px; columns:2; font-size:13px; }
+.review-list li { margin:3px 0; break-inside:avoid; }
 footer { margin-top:44px; text-align:center; color:var(--muted); font-size:12px; }
 """
 
@@ -317,6 +363,47 @@ def _chart_block(div_id: str, title: str = "") -> str:
     return f'<div class="panel"><div id="{div_id}" style="width:100%;height:360px"></div></div>'
 
 
+def _review_block(match: Match, review: MatchReview) -> str:
+    """Разбор матча: карточки точности, кривая оценки, ходы и ключевые моменты."""
+    if not _review_supported(match):
+        return ""
+    cards = []
+    for name, pr in review.players.items():
+        if not pr.verdicts:
+            continue
+        color = esc(player_color(match, name) or "#d4af37")
+        c = pr.counts
+        cards.append(
+            f'<div class="review-card" style="border-left-color:{color}">'
+            f'<div class="rc-name" style="color:{color}">{esc(name)}</div>'
+            f'<div class="rc-acc">{pr.accuracy:g}%</div>'
+            f'<div class="rc-sub">точность · отлично {c["great"]} · '
+            f'ошибки {c["mistake"]} · зевки {c["blunder"]}</div>'
+            f"</div>"
+        )
+    verdicts = sorted(
+        (v for pr in review.players.values() for v in pr.notable),
+        key=lambda v: (v.turn, v.player))
+    rows = "".join(
+        f'<li><b>Ход {v.turn}</b> · {esc(v.player)} — {esc(v.label)}'
+        + (f": {esc(v.reason)}" if v.reason else "") + "</li>"
+        for v in verdicts)
+    verdicts_html = (f'<div class="panel"><h3 class="rc-h">Ходы, на которые стоит посмотреть</h3>'
+                     f'<ul class="review-list">{rows}</ul></div>') if rows else ""
+    moments = "".join(
+        f'<div class="step"><b>{t}</b> · {esc(n)} — {esc(txt)}</div>'
+        for t, n, txt in review.key_moments)
+    moments_html = (f'<div class="panel"><h3 class="rc-h">Ключевые моменты</h3>'
+                    f'<div class="timeline">{moments}</div></div>') if moments else ""
+    return ('<h2>🧭 Разбор матча</h2>'
+            f'<div class="panel"><div class="review-cards">{"".join(cards)}</div></div>'
+            + _chart_block("chart-eval")
+            + verdicts_html
+            + moments_html
+            + '<div class="subtitle">Разбор эвристический: точность и оценка считаются '
+              'по боевым итогам ходов, без игрового движка.</div>')
+
+
 # ---------- сборка ----------
 
 def build_report(match: Match, plotly_js=_AUTO) -> str:
@@ -329,7 +416,8 @@ def build_report(match: Match, plotly_js=_AUTO) -> str:
         plotly_js = load_bundled_plotly()
     match.validate()
 
-    figs = _build_figures(match)
+    review = review_match(match)
+    figs = _build_figures(match, review)
     figs_json = (json.dumps(figs, ensure_ascii=False)
                    .replace("<", r"\u003c").replace(">", r"\u003e")
                    .replace("&", r"\u0026"))
@@ -365,6 +453,7 @@ def build_report(match: Match, plotly_js=_AUTO) -> str:
         f"{_chart_block('chart-kills')}{_chart_block('chart-losses')}</div>",
         (_chart_block("chart-damage") if "chart-damage" in figs else ""),
         _chart_block("chart-combat"),
+        _review_block(match, review),
         _awards_block(match),
         f"<footer>Сгенерировано polytopia-match-analyzer v{__version__} · {generated}</footer>",
         "</div>",

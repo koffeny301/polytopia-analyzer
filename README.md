@@ -326,6 +326,8 @@ recorded points, standings from the last known score.
 - Army: size per turn and player rank changes;
 - Combat: cumulative kills/losses, per-turn damage bars (when damage data
   exists) and combat-outcome comparison incl. total damage dealt;
+- Game review (chess.com-style, heuristic): per-player accuracy, per-turn
+  verdicts (great/mistake/blunder), advantage curve with key-moment markers;
 - Awards: "Warrior", "Economist", "Conqueror", "Sniper", "Strategist".
 
 The report is self-contained: plotly.js is embedded in the HTML (~1 MB), no
@@ -752,6 +754,8 @@ turn,player,score,income,army,cities,kills,losses,captured,lost_cities,damage
 - Армия: размер по ходам и смена мест игроков;
 - Боевые действия: накопительные kills/losses, урон по ходам (когда данные
   урона есть) и сравнение боевых итогов, включая суммарный урон;
+- Разбор матча в стиле chess.com (эвристика): точность игроков, вердикты по
+  ходам (отличный/ошибка/зевк), кривая преимущества с ключевыми моментами;
 - Награды: «Воин», «Экономист», «Завоеватель», «Снайпер», «Стратег».
 
 Отчёт самодостаточен: plotly.js встроен в HTML (~1 МБ), интернет не нужен.
