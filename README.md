@@ -57,6 +57,15 @@ Nothing is written to the game: read-only access to metadata and fields.
 attempt is refused and logged. This is part of the promise: a tool for reviewing
 finished matches, not an in-game assistant.
 
+**Fast capture (experimental).** A replay is an initial state plus a command
+journal, so the shim can ask the engine to rewind the simulation
+(`SeekToCommandImmediate`) instead of waiting for playback: all turns are
+captured in ~15–25 s instead of the full ~200 s playback, byte-identical to
+passive capture. Calling engine methods from a side thread is not supported by
+Unity, so the mode is opt-in (`POLYREAD_SEEK=1` in
+`~/.local/share/polytopia-analyzer/shim.env`) and falls back to passive capture
+automatically on any error. Details: `docs/shim-dump.md`.
+
 ```bash
 make -C shim
 polytopia-analyzer install-shim enable --restart-steam   # Steam launch options
@@ -485,6 +494,15 @@ polytopia-analyzer open <ссылка> --launch      # реплей открое
 (класс клиента `ReplayClient`). В живом матче снимков не будет — попытка
 отказана и записана в журнал. Это часть обещания: инструмент для разбора
 завершённых матчей, а не помощник в игре.
+
+**Быстрое снятие (эксперимент).** Реплей — это начальное состояние плюс журнал
+команд, поэтому шим может попросить движок перемотать симуляцию
+(`SeekToCommandImmediate`) вместо ожидания проигрывания: все ходы снимаются
+за ~15–25 с вместо ~200 с полного проигрывания, данные байт-в-байт как при
+пассивном снятии. Вызовы методов движка из побочного потока Unity не
+поддерживает, поэтому режим включается отдельно (`POLYREAD_SEEK=1` в
+`~/.local/share/polytopia-analyzer/shim.env`) и при любой ошибке автоматически
+откатывается к пассивному снятию. Подробности: `docs/shim-dump.md`.
 
 ```bash
 make -C shim

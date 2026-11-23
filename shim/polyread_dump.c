@@ -9,6 +9,21 @@
  *   POLYREAD_DUMP=/путь        → указанная папка
  *   POLYREAD_DUMP_FIND=1       → только найти GameState и напечатать путь (без снимков)
  *   POLYREAD_DUMP_INTERVAL=300 → период опроса, мс (по умолчанию 300)
+ *   POLYREAD_TIMESCALE=10      → ускорение проигрывания через Unity
+ *                                Time.timeScale. ВНИМАНИЕ: в текущей сборке
+ *                                игры set_timeScale вырезан стриппингом IL2CPP
+ *                                — механизм автоматически отключается и ждет
+ *                                обновлений игры.
+ *   POLYREAD_DUMP_METHODS="ReplayClient,Time" → разведка методов классов
+ *                                (пишет methods-<Класс>.txt и завершается)
+ *   POLYREAD_SEEK=1            → ЭКСПЕРИМЕНТ: снимать ходы нативной перемоткой
+ *                                SeekToCommandImmediate вместо ожидания
+ *                                проигрывания (~15–25 с вместо ~200 с). Данные
+ *                                байт-в-байт как при пассивном снятии, но вызовы
+ *                                методов движка из своего потока небезопасны:
+ *                                возможен сбой игры. При любой ошибке шим
+ *                                автоматически возвращается к пассивному
+ *                                снятию. Настройка через shim.env или env.
  *
  * Защита от падений: каждое чтение памяти объекта обёрнуто в sigsetjmp и
  * SIGSEGV/SIGBUS-обработчик, который действует только для нашего потока.
@@ -79,6 +94,14 @@ typedef size_t (*fn_class_instance_size)(Il2CppClass *);
 typedef Il2CppClass *(*fn_field_get_parent)(FieldInfo *);
 typedef Il2CppClass *(*fn_class_get_parent)(Il2CppClass *);
 typedef void *(*fn_thread_attach)(Il2CppDomain *);
+typedef void (*fn_class_init)(Il2CppClass *);
+/* необязательное API: разведка методов и ускорение проигрывания (Time.timeScale) */
+typedef Il2CppClass *(*fn_class_from_name)(const Il2CppImage *, const char *, const char *);
+typedef void *(*fn_class_get_methods)(Il2CppClass *, void **);
+typedef const char *(*fn_method_get_name)(const void *);
+typedef uint32_t (*fn_method_get_param_count)(const void *);
+typedef const Il2CppType *(*fn_method_get_param)(const void *, uint32_t);
+typedef void *(*fn_runtime_invoke)(const void *, void *, void **, void **);
 
 static struct api {
     fn_domain_get domain_get;
@@ -107,6 +130,13 @@ static struct api {
     fn_field_get_parent field_get_parent;
     fn_class_get_parent class_get_parent;
     fn_thread_attach thread_attach;
+    fn_class_init class_init;
+    fn_class_from_name class_from_name;
+    fn_class_get_methods class_get_methods;
+    fn_method_get_name method_get_name;
+    fn_method_get_param_count method_get_param_count;
+    fn_method_get_param method_get_param;
+    fn_runtime_invoke runtime_invoke;
 } A;
 
 static char g_outdir[1024];
@@ -333,6 +363,21 @@ static int resolve_all(void *h) {
         *tab[i].slot = dlsym(h, tab[i].name);
         if (!*tab[i].slot) *tab[i].slot = dlsym(RTLD_DEFAULT, tab[i].name);
         if (!*tab[i].slot) { missing++; logf_("НЕТ СИМВОЛА %s", tab[i].name); }
+    }
+    /* необязательные символы (разведка методов, timeScale): без них не умираем */
+    struct { const char *name; void **slot; } opt[] = {
+        {"il2cpp_class_init", (void **)&A.class_init},
+        {"il2cpp_class_from_name", (void **)&A.class_from_name},
+        {"il2cpp_class_get_methods", (void **)&A.class_get_methods},
+        {"il2cpp_method_get_name", (void **)&A.method_get_name},
+        {"il2cpp_method_get_param_count", (void **)&A.method_get_param_count},
+        {"il2cpp_method_get_param", (void **)&A.method_get_param},
+        {"il2cpp_runtime_invoke", (void **)&A.runtime_invoke},
+    };
+    for (size_t i = 0; i < sizeof(opt) / sizeof(opt[0]); ++i) {
+        *opt[i].slot = dlsym(h, opt[i].name);
+        if (!*opt[i].slot) *opt[i].slot = dlsym(RTLD_DEFAULT, opt[i].name);
+        if (!*opt[i].slot) logf_("нет необязательного символа %s", opt[i].name);
     }
     return missing;
 }
@@ -860,6 +905,126 @@ static void dump_fields_mode(const char *list) {
                   (fl & FIELD_ATTRIBUTE_STATIC) && ptr_ok(sv) ? " = (объект)" : "");
         }
     }
+}
+
+/* разведка методов: POLYREAD_DUMP_METHODS="ReplayClient,Time" — имена методов
+ * (с числом параметров) по цепочке наследования; экземпляр не нужен, только
+ * метаданные. Пишет methods-<Класс>.txt рядом со снимками. */
+static void dump_methods_mode(const char *list) {
+    if (!A.class_get_methods || !A.method_get_name) {
+        logf_("METHODS: API методов недоступно");
+        return;
+    }
+    char buf[512];
+    snprintf(buf, sizeof(buf), "%s", list);
+    char *save = NULL;
+    for (char *name = strtok_r(buf, ",", &save); name; name = strtok_r(NULL, ",", &save)) {
+        while (*name == ' ') name++;
+        Il2CppClass *k = find_class_pref(name);
+        if (!k) k = find_class_all(name);
+        logf_("=== МЕТОДЫ %s: %p ===", name, (void *)k);
+        if (!k) continue;
+        char path[1200];
+        snprintf(path, sizeof(path), "%s/methods-%s.txt", g_outdir, name);
+        FILE *f = fopen(path, "w");
+        Il2CppClass *cur = k;
+        for (int depth = 0; cur && depth < 10; ++depth) {
+            const char *cn = A.class_get_name(cur);
+            if (f) fprintf(f, "--- %s ---\n", cn ? cn : "?");
+            void *it = NULL;
+            for (;;) {
+                void *m = A.class_get_methods(cur, &it);
+                if (!m) break;
+                const char *mn = A.method_get_name(m);
+                uint32_t np = A.method_get_param_count ? A.method_get_param_count(m) : 0;
+                if (!mn) continue;
+                /* сигнатура: имя + типы параметров */
+                char sig[256];
+                int so = snprintf(sig, sizeof(sig), "%s(", mn);
+                for (uint32_t pi = 0; pi < np && so < (int)sizeof(sig) - 24; ++pi) {
+                    const Il2CppType *pt = A.method_get_param ? A.method_get_param(m, pi) : NULL;
+                    char *tn = pt ? A.type_get_name(pt) : NULL;
+                    so += snprintf(sig + so, sizeof(sig) - (size_t)so, "%s%s",
+                                   pi ? ", " : "", tn ? tn : "?");
+                }
+                snprintf(sig + so, sizeof(sig) - (size_t)so, ")");
+                logf_("  %s::%s", cn ? cn : "?", sig);
+                if (f) fprintf(f, "%s\n", sig);
+            }
+            cur = w_parent(cur);
+        }
+        if (f) fclose(f);
+    }
+}
+
+/* ---------- ускорение проигрывания реплея (Unity Time.timeScale) ----------
+ * Реплей — детерминированная симуляция: состояние существует только когда
+ * движок его просчитал, «перемотать в конец» нельзя. Но проигрывание идёт в
+ * игровом времени — подняв Time.timeScale, ускоряем его в N раз. Ставим только
+ * на время реплея (replay_mode_ok), возвращаем 1.0 при выходе из реплея/меню
+ * и в конце потока. */
+static Il2CppClass *g_time_cls = NULL;
+static const void *g_m_set_ts = NULL;
+static float g_ts_want = 0.0f;
+static int g_ts_applied = 0;
+
+static void timescale_init(void) {
+    g_ts_want = 10.0f; /* по умолчанию реплей в 10 раз быстрее */
+    const char *ev = getenv("POLYREAD_TIMESCALE");
+    if (ev) {
+        g_ts_want = (float)atof(ev);
+        if (g_ts_want < 1.0f) g_ts_want = 0.0f;   /* 0/мусор — выключено */
+        if (g_ts_want > 100.0f) g_ts_want = 100.0f;
+    }
+    if (g_ts_want <= 0.0f) { logf_("timeScale: выключено"); return; }
+    if (!A.class_from_name || !A.class_get_methods || !A.runtime_invoke) {
+        logf_("timeScale: нет API — ускорение выключено");
+        g_ts_want = 0.0f;
+        return;
+    }
+    for (size_t i = 0; i < g_nimg; ++i) {
+        const char *iname = A.image_get_name(g_images[i]);
+        if (!iname || strncmp(iname, "UnityEngine.CoreModule", 22) != 0) continue;
+        Il2CppClass *t = A.class_from_name(g_images[i], "UnityEngine", "Time");
+        if (t) { g_time_cls = t; break; }
+    }
+    if (!g_time_cls) { logf_("timeScale: UnityEngine.Time не найден"); g_ts_want = 0.0f; return; }
+    if (A.class_init && G_TRY) { A.class_init(g_time_cls); g_guard = 0; } else g_guard = 0;
+    void *it = NULL;
+    int ncnt = 0;
+    for (;;) {
+        void *m = A.class_get_methods(g_time_cls, &it);
+        if (!m) break;
+        const char *mn = A.method_get_name(m);
+        if (!mn) continue;
+        if (ncnt < 40) logf_("  Time.method: %s", mn);
+        ncnt++;
+        if (!strcmp(mn, "set_timeScale") &&
+            (!A.method_get_param_count || A.method_get_param_count(m) == 1)) {
+            g_m_set_ts = m;
+        }
+    }
+    logf_("timeScale: Time=%p методов=%d set_timeScale=%p цель=%.1f",
+          (void *)g_time_cls, ncnt, g_m_set_ts, g_ts_want);
+    if (!g_m_set_ts) g_ts_want = 0.0f;
+}
+
+static void timescale_set(float v) {
+    if (!g_m_set_ts) return;
+    if (G_TRY) {
+        void *args[1] = { &v };
+        A.runtime_invoke(g_m_set_ts, NULL, args, NULL);
+        g_guard = 0;
+        logf_("timeScale -> %.2f", v);
+    } else g_guard = 0;
+}
+
+static void timescale_enter(void) {
+    if (g_ts_want > 1.0f && !g_ts_applied) { timescale_set(g_ts_want); g_ts_applied = 1; }
+}
+
+static void timescale_leave(void) {
+    if (g_ts_applied) { timescale_set(1.0f); g_ts_applied = 0; }
 }
 
 /* значения статических кандидатов (диагностика) */
@@ -1498,13 +1663,401 @@ static void write_snapshot(int turn, int force) {
     logf_("снимок записан: ход %d", turn);
 }
 
+/* ---------- эксперимент: быстрое снятие реплея через нативную перемотку ----------
+ * Реплей = начальное состояние + журнал команд, анимации — лишь способ
+ * проигрывания. Движок умеет перематывать симуляцию к любой команде:
+ * ClientBase.SeekToCommandImmediate(UInt16, Action<Boolean>).
+ * План: индексы EndTurnCommand — границы раундов; снимок хода t по образцу
+ * пассивного снятия = состояние после команд раунда t, ДО его EndTurn, т.е.
+ * команда ends[t-1]-1 (смещение настраивается POLYREAD_SEEK_OFFSET).
+ * Вызываем из своего потока через runtime_invoke — при любом сбое/таймауте
+ * откатываемся к пассивному снятию (оно продолжает работать). Включается POLYREAD_SEEK=1. */
+static void *g_m_seek = NULL;
+static void *g_m_skip_recap = NULL;
+static void *g_m_get_am = NULL;
+static void *g_am = NULL;
+static void *g_m_stop_proc = NULL, *g_m_start_proc = NULL;
+static int g_seek_on = 0, g_seek_done = 0, g_seek_fail = 0;
+static uint16_t g_seek_ends[1024];
+static int g_seek_n = 0, g_seek_step = -2, g_seek_await = -1, g_seek_grace = 0;
+static int g_seek_offset = 0;
+static int g_seek_exc = 0, g_seek_retries = 0, g_seek_diag = 0;
+static long g_seek_pos = -1;   /* индекс команды, куда уже перемотаны */
+static int g_seek_cool = 0;    /* тики до следующей перемотки */
+static int g_seek_unfrozen = 0;
+static int g_seek_reseek = 0;  /* повторы перемотки текущего шага */
+static int g_applied_prev = -2, g_applied_stable = 0, g_applied_stall = 0;
+/* Длинные прыжки SeekToCommandImmediate применяет асинхронно и «проматывает»
+ * состояние к финалу (проверено: прыжок 31 команда ломал цикл 11; короткие
+ * прыжки ≤22 команд дают байт-в-байт пассивное состояние). Дробим прыжок
+ * промежуточными ступеньками. */
+#define SEEK_MAX_HOP 16
+
+/* позиция симуляции (ClientBase.targetGameStateCurrentCommand): растёт,
+ * пока движок применяет команды (пересборка после перемотки или проигрывание).
+ * Используем как индикатор занятости: дёргать SeekToCommandImmediate можно
+ * только когда значение стабилизировалось (падение 23.11 — вызов во время
+ * пересборки). */
+static int seek_applied(void) {
+    int32_t v = -1;
+    if (ptr_ok(g_client) && g_client_cls)
+        f_i32(g_client, g_client_cls, "targetGameStateCurrentCommand", &v);
+    return (int)v;
+}
+
+/* поиск метода по имени в цепочке классов */
+static void *cls_method(Il2CppClass *k, const char *name) {
+    if (!A.class_get_methods) return NULL;
+    for (int d = 0; k && d < 10; ++d, k = w_parent(k)) {
+        void *it = NULL;
+        for (;;) {
+            void *m = A.class_get_methods(k, &it);
+            if (!m) break;
+            const char *mn = A.method_get_name(m);
+            if (mn && !strcmp(mn, name)) return m;
+        }
+    }
+    return NULL;
+}
+
+static void seek_find_methods(void) {
+    if (!g_client_cls || !A.class_get_methods) return;
+    g_m_seek = cls_method(g_client_cls, "SeekToCommandImmediate");
+    g_m_skip_recap = cls_method(g_client_cls, "SkipRecap");
+    g_m_get_am = cls_method(g_client_cls, "get_ActionManager");
+    logf_("seek: Seek=%p SkipRecap=%p get_ActionManager=%p",
+          g_m_seek, g_m_skip_recap, g_m_get_am);
+}
+
+/* заморозить собственную обработку команд движком: иначе после каждой
+ * перемотки он «догоняет» журнал до конца и утаскивает состояние вперёд
+ * (диагностика 23.11: цикл 11 стабильно уезжал в финал матча) */
+static void seek_call(void *m, void *obj, void **args, const char *what);
+
+static void seek_freeze_processing(void) {
+    if (!g_m_get_am || !A.runtime_invoke) return;
+    if (G_TRY) {
+        g_am = A.runtime_invoke(g_m_get_am, g_client, NULL, NULL);
+        g_guard = 0;
+    } else { g_guard = 0; g_am = NULL; }
+    if (!ptr_ok(g_am)) { logf_("seek: ActionManager недоступен"); return; }
+    Il2CppClass *amk = w_obj_class(g_am);
+    g_m_stop_proc = cls_method(amk, "StopProcessing");
+    g_m_start_proc = cls_method(amk, "StartProcessing");
+    if (g_m_stop_proc) seek_call(g_m_stop_proc, g_am, NULL, "ActionManager.StopProcessing");
+    else logf_("seek: StopProcessing не найден");
+}
+
+static void seek_unfreeze_processing(void) {
+    if (g_m_start_proc && ptr_ok(g_am))
+        seek_call(g_m_start_proc, g_am, NULL, "ActionManager.StartProcessing");
+}
+
+/* бит маски для pid: 255 (Nature/нейтралы) и прочие большие сводим в бит 31 */
+static uint32_t pid_bit(uint8_t pid) { return pid < 31 ? (1u << pid) : (1u << 31); }
+
+static void seek_build_plan(void) {
+    if (!ptr_ok(g_client) || !g_client_cls) return;
+    void *tgt = f_ptr(g_client, g_client_cls, "targetGameState");
+    if (!ptr_ok(tgt) || !class_is(tgt, g_gamestate_cls)) return;
+    void *cstack = f_ptr(tgt, g_gamestate_cls, "<CommandStack>k__BackingField");
+    int32_t cn = list_size(cstack);
+    void *arr = list_items(cstack);
+    if (!ptr_ok(arr) || cn <= 0 || cn > 8192) return;
+    Il2CppClass *cmdbase = find_class_pref("CommandBase");
+
+    /* проход 1: маска игроков, выпускающих EndTurnCommand (длина цикла);
+     * тот же принцип, что в _command_turns импортёра */
+    uint32_t end_mask = 0;
+    for (int32_t i = 0; i < cn; ++i) {
+        void *cmd = arr_at(arr, i);
+        if (!ptr_ok(cmd)) continue;
+        Il2CppClass *cc = w_obj_class(cmd);
+        const char *nm = cc && A.class_get_name(cc) ? A.class_get_name(cc) : NULL;
+        if (!nm || strcmp(nm, "EndTurnCommand")) continue;
+        uint8_t pid = 0;
+        if (cmdbase) f_u8(cmd, cmdbase, "<PlayerId>k__BackingField", &pid);
+        end_mask |= pid_bit(pid);
+    }
+    if (!end_mask) return;
+
+    /* проход 2: цель каждого цикла — его ПОСЛЕДНИЙ EndTurn (полная маска).
+     * Диагностика 23.11: состояние после него в точности совпадает с
+     * пассивным снимком этого хода; после промежуточных EndTurn движок
+     * преждевременно применяет команды следующего раунда. */
+    uint32_t seen = 0;
+    g_seek_n = 0;
+    for (int32_t i = 0; i < cn && g_seek_n < 1024; ++i) {
+        void *cmd = arr_at(arr, i);
+        if (!ptr_ok(cmd)) continue;
+        Il2CppClass *cc = w_obj_class(cmd);
+        const char *nm = cc && A.class_get_name(cc) ? A.class_get_name(cc) : NULL;
+        if (!nm || strcmp(nm, "EndTurnCommand")) continue;
+        uint8_t pid = 0;
+        if (cmdbase) f_u8(cmd, cmdbase, "<PlayerId>k__BackingField", &pid);
+        seen |= pid_bit(pid);
+        if (seen == end_mask) {
+            g_seek_ends[g_seek_n++] = (uint16_t)i;
+            seen = 0;
+        }
+    }
+    if (g_seek_n > 0) {
+        g_seek_step = 0;
+        logf_("seek: план — %d циклов (маска игроков 0x%x) из %d команд, offset=%d",
+              g_seek_n, end_mask, cn, g_seek_offset);
+    }
+}
+
+static void seek_call(void *m, void *obj, void **args, const char *what) {
+    if (!m || !ptr_ok(obj)) return;
+    if (G_TRY) {
+        void *exc = NULL;
+        A.runtime_invoke(m, obj, args, &exc);
+        g_guard = 0;
+        if (exc) {
+            Il2CppClass *ec = w_obj_class((Il2CppObject *)exc);
+            logf_("seek: %s — ИСКЛЮЧЕНИЕ %s", what,
+                  ec && A.class_get_name(ec) ? A.class_get_name(ec) : "?");
+            g_seek_exc = 1;
+        } else logf_("seek: %s — вызван", what);
+    } else {
+        g_guard = 0;
+        logf_("seek: %s — ПАДЕНИЕ при вызове, seek отключён", what);
+        g_seek_fail = 1;
+    }
+}
+
+static void seek_invoke_idx(long idx, const char *what) {
+    if (idx < 0) idx = 0;
+    uint16_t u = (uint16_t)idx;
+    void *args[2] = { &u, NULL };
+    seek_call(g_m_seek, g_client, args, what);
+}
+
+/* Возвращает 1, если тик потреблён seek-режимом (пассивную запись пропустить).
+ * Шаги: -1 = базовый снимок (перемотка в начало), 0..n-1 = границы по всем
+ * EndTurnCommand; снимок пишется только когда turn вырос (граница раунда),
+ * внутрираундовые EndTurn просто пропускаются. Seek синхронный (Immediate),
+ * поэтому ожидание — не более одного дополнительного тика. */
+static int seek_tick(void **gs_p, Il2CppClass *gm_cls, char *where, size_t cap) {
+    if (g_seek_fail) {
+        /* разморозить проигрывание, чтобы пассивный режим мог доснять */
+        if (!g_seek_unfrozen) { g_seek_unfrozen = 1; seek_unfreeze_processing(); }
+        return 0;
+    }
+    if (!g_m_seek) {
+        if (!ptr_ok(g_client)) return 0;   /* клиент ещё не найден — пассивно */
+        seek_find_methods();
+        if (!g_m_seek) {
+            logf_("seek: метод не найден — остаётся пассивное снятие");
+            g_seek_fail = 1;
+            return 0;
+        }
+    }
+    if (g_seek_step < -1) {
+        seek_build_plan();
+        if (g_seek_step < -1) return 0;    /* журнал команд ещё не готов */
+        /* SkipRecap НЕ зовем (по умолчанию): он снимает анимационное
+         * торможение, и движок гонит журнал команд вперёд быстрее наших
+         * перемоток (состояние уезжало к финалу на поздних циклах).
+         * При анимационном темпе (~16 с/раунд) окно чтения 450 мс безопасно.
+         * Включить для экспериментов: POLYREAD_SEEK_SKIPRECAP=1 */
+        if (g_m_skip_recap && getenv("POLYREAD_SEEK_SKIPRECAP"))
+            seek_call(g_m_skip_recap, g_client, NULL, "SkipRecap");
+        seek_freeze_processing();
+        g_seek_exc = 0;
+        g_seek_step = -1;
+        return 1;
+    }
+
+    /* после перемотки объект GameState может быть заменён — каждый тик
+     * перечитываем его из клиента, иначе читаем устаревший снимок */
+    void *fresh0 = state_from_client(gm_cls, where, cap);
+    if (fresh0) *gs_p = fresh0;
+    void *gs = *gs_p;
+    int turn = 0;
+    int have = (ptr_ok(gs) && class_is(gs, g_gamestate_cls)) ? snapshot(gs, &turn) : 0;
+    if (!have) return 1;
+
+    if (g_seek_step == -1) {
+        /* базовый снимок из initialGameState — детерминированно, без гонки
+         * с проигрыванием (повторный запуск даёт тот же snapshot-000) */
+        void *ig = f_ptr(g_client, g_client_cls, "initialGameState");
+        if (ptr_ok(ig) && class_is(ig, g_gamestate_cls) && g_last_turn < 0) {
+            if (build_snapshot(ig, 0)) {
+                write_snapshot(0, 1); events_reset();
+                logf_("seek: snapshot-000 записан из initialGameState");
+            }
+        } else {
+            logf_("seek: initialGameState недоступен — снимаем без snapshot-000");
+        }
+        g_seek_step = 0;
+        return 1;
+    }
+    if (g_seek_step >= g_seek_n) {
+        g_seek_done = 1;
+        seek_unfreeze_processing(); /* вернуть проигрывание пользователю */
+        logf_("seek: снятие завершено — границ %d, последний ход %d", g_seek_n, g_last_turn);
+        return 1;
+    }
+
+    if (g_seek_await < 0) {
+        /* выдержка между перемотками: вызов во время обработки предыдущей
+         * бросает исключение (движок занят), а в неудачный момент — роняет
+         * процесс (проверено 23.11 на прыжке 114→120) */
+        if (g_seek_cool > 0) { g_seek_cool--; return 1; }
+        /* ждём «idle» движка: позиция симуляции не меняется 2 тика подряд.
+         * Вызов во время пересборки состояния роняет процесс (23.11).
+         * Если позиция ползёт дольше 40 тиков — рискуем всё равно. */
+        {
+            int applied = seek_applied();
+            if (applied >= 0) {
+                if (applied != g_applied_prev) {
+                    g_applied_prev = applied;
+                    g_applied_stable = 0;
+                    if (++g_applied_stall < 40) return 1;
+                    logf_("seek: движок не успокаивается (applied=%d) — вызываю принудительно",
+                          applied);
+                } else if (g_applied_stable < 2) {
+                    g_applied_stable++;
+                    if (g_applied_stable < 2) return 1;
+                }
+            }
+            g_applied_stall = 0;
+        }
+        /* выдать перемотку: при необходимости дробим длинный прыжок на
+         * ступеньки по SEEK_MAX_HOP команд (короткие применяются синхронно
+         * и не «проматывают» состояние вперёд) */
+        long idx = (long)g_seek_ends[g_seek_step] + g_seek_offset;
+        long hop = idx;
+        if (g_seek_pos >= 0 && idx - g_seek_pos > SEEK_MAX_HOP)
+            hop = g_seek_pos + SEEK_MAX_HOP;
+        char what[88];
+        snprintf(what, sizeof(what), "SeekToCommandImmediate(%ld)%s шаг %d",
+                 hop, hop == idx ? "" : " [ступенька]", g_seek_step);
+        g_seek_exc = 0;
+        seek_invoke_idx(hop, what);
+        g_seek_cool = 2;
+        if (g_seek_fail) return 0;
+        if (g_seek_exc) {
+            /* движок занят предыдущей перемоткой — повторим на след. тике */
+            if (++g_seek_retries > 60) {
+                logf_("seek: шаг %d — 60 исключений подряд, откат к пассивному снятию",
+                      g_seek_step);
+                g_seek_fail = 1;
+                return 0;
+            }
+            return 1;
+        }
+        g_seek_retries = 0;
+        g_seek_pos = hop;
+        if (hop != idx) return 1;   /* ступенька: цель ещё впереди */
+        /* Целевая перемотка выдана — читаем состояние В ТОМ ЖЕ тике: до
+         * следующего тика движок может промотать финал реплея вперёд */
+        g_seek_await = g_seek_step;
+        g_seek_grace = 0;
+        void *gs2 = state_from_client(gm_cls, where, cap);
+        if (gs2) *gs_p = gs2;
+        gs = *gs_p;
+        turn = 0;
+        have = (ptr_ok(gs) && class_is(gs, g_gamestate_cls)) ? snapshot(gs, &turn) : 0;
+        if (!have) return 1;
+        /* проваливаемся в общее решение ниже */
+    } else if (++g_seek_grace > 24) {
+        /* состояние так и не прочиталось — шаг вперёд без снимка */
+        logf_("seek: шаг %d — состояние не читается, пропускаю", g_seek_step);
+        g_seek_step++;
+        g_seek_await = -1;
+        g_seek_grace = 0;
+        return 1;
+    }
+
+    /* ---- Единое решение по шагу: turn прочитан, метка = номер цикла ----
+     * Корректная граница даёт turn ∈ {label-1, label} (диагностика 23.11:
+     * на последнем EndTurn цикла поле turn запаздывает на 0..1).
+     * turn > label — движок промотал реплей к финалу (финишный рывок):
+     * перематываем назад; гонщик уже финишировал, обратная пересборка чистая.
+     * turn < label-1 — пересборка ещё не приземлилась: ждём, потом перематываем. */
+    int label = g_seek_await + 1;
+
+    if (g_seek_diag) {
+        if (++g_seek_grace >= 3) {
+            if (build_snapshot(gs, turn)) write_snapshot(900 + g_seek_await, 0);
+            g_seek_step++; g_seek_await = -1; g_seek_grace = 0;
+        }
+        return 1;
+    }
+
+    int ok = (turn >= label - 1 && turn <= label);
+    if (!ok && turn > label && g_seek_reseek < 3) {
+        g_seek_reseek++;
+        logf_("seek: шаг %d — turn %d > %d (промчался), перематываю назад (%d)",
+              g_seek_step, turn, label, g_seek_reseek);
+        g_seek_await = -1; g_seek_cool = 2; g_seek_grace = 0;
+        return 1;
+    }
+    if (!ok && turn < label - 1) {
+        if (g_seek_grace < 4) return 1;            /* ждём приземления */
+        if (g_seek_reseek < 3) {
+            g_seek_reseek++;
+            logf_("seek: шаг %d — turn %d < %d, повторяю перемотку (%d)",
+                  g_seek_step, turn, label - 1, g_seek_reseek);
+            g_seek_await = -1; g_seek_cool = 2; g_seek_grace = 0;
+            return 1;
+        }
+        logf_("seek: шаг %d — пересборка не приземлилась (turn %d), пишу как есть",
+              g_seek_step, turn);
+    } else if (!ok) {
+        logf_("seek: шаг %d — turn %d вне диапазона метки %d, пишу как есть",
+              g_seek_step, turn, label);
+    }
+
+    if (label != g_last_turn) {
+        if (build_snapshot(gs, label)) { write_snapshot(label, 1); events_reset(); }
+    }
+    g_seek_step++;
+    g_seek_await = -1;
+    g_seek_grace = 0;
+    g_seek_reseek = 0;
+    return 1;
+}
+
 /* ---------- главный цикл ---------- */
+/* Конфиг-файл ~/.local/share/polytopia-analyzer/shim.env: строки KEY=***
+ * Применяется через setenv только для переменных, которых нет в окружении —
+ * launch-опции Steam имеют приоритет. Позволяет менять параметры сима
+ * (POLYREAD_SEEK, POLYREAD_TIMESCALE, POLYREAD_DUMP_INTERVAL…) без
+ * перезапуска Steam. */
+static void load_config_file(void) {
+    const char *home = getenv("HOME");
+    if (!home) return;
+    char path[1200];
+    snprintf(path, sizeof(path), "%s/.local/share/polytopia-analyzer/shim.env", home);
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    char line[512];
+    int n = 0;
+    while (fgets(line, sizeof(line), f)) {
+        if (line[0] == '#' || line[0] == '\n') continue;
+        char *eq = strchr(line, '=');
+        if (!eq) continue;
+        *eq = '\0';
+        char *val = eq + 1;
+        size_t ln = strlen(val);
+        while (ln && (val[ln - 1] == '\n' || val[ln - 1] == '\r')) val[--ln] = '\0';
+        if (!getenv(line) && setenv(line, val, 0) == 0) n++;
+    }
+    fclose(f);
+    logf_("shim.env: применено переменных: %d", n);
+}
+
 static void run_dump(void) {
     char p[1200];
     snprintf(p, sizeof(p), "%s/dump.log", g_outdir);
     g_log = fopen(p, "w");
     if (!g_log) return;
     logf_("dump: поток запущен, pid=%d", (int)getpid());
+    load_config_file();
 
     /* ждём загрузки движка и даём рантайму подняться: звать il2cpp_* раньше нельзя */
     int waited = 0;
@@ -1563,6 +2116,16 @@ static void run_dump(void) {
           (void *)g_mapdata_cls, (void *)g_tiledata_cls, (void *)g_unitstate_cls,
           (void *)g_impstate_cls, (void *)g_actionbase_cls);
     if (!g_gamestate_cls || !g_playstate_cls) return;
+    timescale_init();
+    if (getenv("POLYREAD_SEEK") && atoi(getenv("POLYREAD_SEEK"))) {
+        const char *ov = getenv("POLYREAD_SEEK_OFFSET");
+        if (ov) g_seek_offset = atoi(ov);
+        if (getenv("POLYREAD_SEEK_DIAG")) g_seek_diag = 1;
+        if (!getenv("POLYREAD_DUMP_INTERVAL")) interval = 150; /* проверенный режим */
+        g_seek_on = 1;
+        logf_("seek: режим включён (offset=%d, diag=%d, interval=%d)",
+              g_seek_offset, g_seek_diag, interval);
+    }
 
     /* ищем GameState: сначала статические поля, потом обход от GameManager.instance */
     char where[160] = {0};
@@ -1584,6 +2147,8 @@ static void run_dump(void) {
         /* ждём: в меню объекта нет, он появится в матче/реплее */
     }
 
+    const char *meths = getenv("POLYREAD_DUMP_METHODS");
+    if (meths && *meths) { dump_methods_mode(meths); return; }
     const char *flds = getenv("POLYREAD_DUMP_FIELDS");
     if (flds && *flds) { dump_fields_mode(flds); return; }
     if (getenv("POLYREAD_DUMP_WATCH")) { watch_tacts(); return; }
@@ -1600,6 +2165,7 @@ static void run_dump(void) {
         g_frames++;
         if (!gs || !ptr_ok(gs) || !class_is(gs, g_gamestate_cls)) {
             /* объект мог появиться позже (открыли реплей) — ищем заново раз в 2 с */
+            timescale_leave(); /* реплей закрыли/меню — скорость игры обычная */
             static time_t last_lookup = 0;
             if (time(NULL) - last_lookup >= 5) { /* не чаще раза в 5 с: обход не бесплатный */
                 last_lookup = time(NULL);
@@ -1619,6 +2185,7 @@ static void run_dump(void) {
             }
         } else {
             if (!replay_mode_ok()) {
+                timescale_leave(); /* живой матч/лобби — никогда не ускоряем */
                 if (!g_live_noted) {
                     logf_("не реплей (клиент «%s») — снимки не пишем; "
                           "обход для отладки: POLYREAD_DUMP_ALLOW_LIVE=1",
@@ -1629,6 +2196,13 @@ static void run_dump(void) {
                 continue;
             }
             if (g_live_noted) { logf_("режим реплея — снимки включены"); g_live_noted = 0; }
+            if (g_seek_on && !g_seek_done &&
+                seek_tick(&gs, gm_cls, where, sizeof(where))) {
+                dump_commands(); /* журнал команд пишем как обычно */
+                usleep((useconds_t)interval * 1000);
+                continue;
+            }
+            timescale_enter(); /* реплей подтверждён — ускоряем проигрывание */
             int turn = 0;
             int have_turn = snapshot(gs, &turn);
             /* события собираем на каждом опросе: ActionStack — живая очередь
@@ -1647,6 +2221,7 @@ static void run_dump(void) {
         }
         usleep((useconds_t)interval * 1000);
     }
+    timescale_leave();
     restore_guards();
     logf_("dump завершён: кадров=%lu, снимков=%lu, перехвачено падений=%d", g_frames, g_written,
           (int)g_faults);
